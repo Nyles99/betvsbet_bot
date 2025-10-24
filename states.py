@@ -45,3 +45,12 @@ class MatchStates(StatesGroup):
     waiting_for_match_time = State()
     waiting_for_team1 = State()
     waiting_for_team2 = State()
+
+class TournamentStates(StatesGroup):
+    """Состояния для управления турнирами"""
+    waiting_for_tournament_name = State()
+    waiting_for_tournament_description = State()
+    waiting_for_tournament_rules = State()
+    waiting_for_tournament_edit_name = State()
+    waiting_for_tournament_edit_description = State()
+    waiting_for_tournament_edit_rules = State()

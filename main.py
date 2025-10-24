@@ -14,6 +14,7 @@ from handlers.tournaments import register_handlers_tournaments
 from handlers.info import register_handlers_info
 from handlers.matches import register_handlers_matches
 
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,

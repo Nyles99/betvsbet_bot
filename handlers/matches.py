@@ -6,15 +6,44 @@ import re
 from database import db
 from states import MatchStates
 from keyboards import (
-    get_tournaments_for_matches_keyboard, 
     get_tournament_matches_keyboard,
     get_cancel_match_keyboard,
     get_main_menu
 )
 from config_bot import config
 
-async def start_add_match(callback: types.CallbackQuery, state: FSMContext):
-    """Начало процесса добавления матча"""
+async def start_add_match_from_tournament(callback: types.CallbackQuery, state: FSMContext):
+    """Начало процесса добавления матча из управления турниром"""
+    if not callback.from_user.id == config.ADMIN_ID:
+        await callback.answer("❌ Недостаточно прав!")
+        return
+    
+    # Получаем ID турнира из callback_data (формат: add_match_123)
+    tournament_id = int(callback.data.split('_')[2])
+    tournament = await db.get_tournament_by_id(tournament_id)
+    
+    if not tournament:
+        await callback.answer("❌ Турнир не найден!")
+        return
+    
+    # Сохраняем ID турнира в состоянии
+    await state.update_data(
+        tournament_id=tournament_id,
+        tournament_name=tournament['name']
+    )
+    
+    await callback.message.edit_text(
+        f"➕ *Добавление матча в турнир: {tournament['name']}*\n\n"
+        "📅 Введите дату матча в формате *ДД.ММ.ГГГГ*:\n\n"
+        "Пример: *19.11.2024*",
+        parse_mode="Markdown"
+    )
+    
+    await MatchStates.waiting_for_match_date.set()
+    await callback.answer()
+
+async def start_add_match_from_admin(callback: types.CallbackQuery, state: FSMContext):
+    """Начало процесса добавления матча из админ-панели (выбор турнира)"""
     if not callback.from_user.id == config.ADMIN_ID:
         await callback.answer("❌ Недостаточно прав!")
         return
@@ -30,6 +59,7 @@ async def start_add_match(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
         return
     
+    from keyboards import get_tournaments_for_matches_keyboard
     await callback.message.edit_text(
         "⚽ *Добавление матча*\n\n"
         "Выберите турнир для добавления матча:",
@@ -41,7 +71,7 @@ async def start_add_match(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 async def select_tournament_for_match(callback: types.CallbackQuery, state: FSMContext):
-    """Выбор турнира для добавления матча"""
+    """Выбор турнира для добавления матча (только при запуске из админ-панели)"""
     if not callback.from_user.id == config.ADMIN_ID:
         await callback.answer("❌ Недостаточно прав!")
         return
@@ -56,7 +86,7 @@ async def select_tournament_for_match(callback: types.CallbackQuery, state: FSMC
     await state.update_data(tournament_id=tournament_id, tournament_name=tournament['name'])
     
     await callback.message.edit_text(
-        f"⚽ *Добавление матча в турнир: {tournament['name']}*\n\n"
+        f"➕ *Добавление матча в турнир: {tournament['name']}*\n\n"
         "📅 Введите дату матча в формате *ДД.ММ.ГГГГ*:\n\n"
         "Пример: *19.11.2024*",
         parse_mode="Markdown"
@@ -290,7 +320,8 @@ async def matches_back(callback: types.CallbackQuery, state: FSMContext):
 def register_handlers_matches(dp: Dispatcher):
     """Регистрация обработчиков матчей"""
     # Обработчики callback-кнопок
-    dp.register_callback_query_handler(start_add_match, lambda c: c.data.startswith('add_match_'))
+    dp.register_callback_query_handler(start_add_match_from_tournament, lambda c: c.data.startswith('add_match_'))
+    dp.register_callback_query_handler(start_add_match_from_admin, lambda c: c.data == 'admin_add_match')
     dp.register_callback_query_handler(select_tournament_for_match, lambda c: c.data.startswith('select_tournament_'))
     dp.register_callback_query_handler(show_tournament_matches, lambda c: c.data.startswith('tournament_matches_'))
     dp.register_callback_query_handler(matches_back, lambda c: c.data == 'matches_back')

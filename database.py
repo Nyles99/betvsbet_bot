@@ -43,6 +43,7 @@ class Database:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         name TEXT NOT NULL,
                         description TEXT,
+                        rules TEXT,
                         is_active INTEGER DEFAULT 1,
                         created_by INTEGER,
                         created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -65,6 +66,20 @@ class Database:
                     )
                 ''')
                 
+                # Таблица участия пользователей в турнирах
+                await db.execute('''
+                    CREATE TABLE IF NOT EXISTS tournament_participants (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        tournament_id INTEGER NOT NULL,
+                        is_participating INTEGER DEFAULT 0,
+                        joined_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(user_id, tournament_id),
+                        FOREIGN KEY (user_id) REFERENCES users (user_id),
+                        FOREIGN KEY (tournament_id) REFERENCES tournaments (id)
+                    )
+                ''')
+                
                 # Индексы для быстрого поиска
                 await db.execute('CREATE INDEX IF NOT EXISTS idx_username ON users(username)')
                 await db.execute('CREATE INDEX IF NOT EXISTS idx_email ON users(email)')
@@ -74,6 +89,8 @@ class Database:
                 await db.execute('CREATE INDEX IF NOT EXISTS idx_tournaments_active ON tournaments(is_active)')
                 await db.execute('CREATE INDEX IF NOT EXISTS idx_matches_tournament ON matches(tournament_id)')
                 await db.execute('CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(match_date)')
+                await db.execute('CREATE INDEX IF NOT EXISTS idx_participants_user ON tournament_participants(user_id)')
+                await db.execute('CREATE INDEX IF NOT EXISTS idx_participants_tournament ON tournament_participants(tournament_id)')
                 
                 await db.commit()
                 logger.info("Таблицы и индексы успешно созданы")
@@ -358,14 +375,14 @@ class Database:
 
     # ========== МЕТОДЫ ДЛЯ ТУРНИРОВ ==========
     
-    async def add_tournament(self, name: str, description: str, created_by: int) -> bool:
+    async def add_tournament(self, name: str, description: str, rules: str, created_by: int) -> bool:
         """Добавление нового турнира"""
         try:
             async with aiosqlite.connect(self.db_name) as db:
                 await db.execute('''
-                    INSERT INTO tournaments (name, description, created_by)
-                    VALUES (?, ?, ?)
-                ''', (name, description, created_by))
+                    INSERT INTO tournaments (name, description, rules, created_by)
+                    VALUES (?, ?, ?, ?)
+                ''', (name, description, rules, created_by))
                 
                 await db.commit()
                 logger.info(f"Турнир '{name}' успешно добавлен")
@@ -411,21 +428,36 @@ class Database:
             logger.error(f"Ошибка при получении турнира: {e}")
             return None
     
-    async def update_tournament(self, tournament_id: int, name: str, description: str) -> bool:
+    async def update_tournament(self, tournament_id: int, name: str, description: str, rules: str) -> bool:
         """Обновление турнира"""
         try:
             async with aiosqlite.connect(self.db_name) as db:
                 await db.execute('''
                     UPDATE tournaments 
-                    SET name = ?, description = ? 
+                    SET name = ?, description = ?, rules = ?
                     WHERE id = ?
-                ''', (name, description, tournament_id))
+                ''', (name, description, rules, tournament_id))
                 
                 await db.commit()
                 logger.info(f"Турнир {tournament_id} успешно обновлен")
                 return True
         except Exception as e:
             logger.error(f"Ошибка при обновлении турнира: {e}")
+            return False
+    
+    async def update_tournament_rules(self, tournament_id: int, rules: str) -> bool:
+        """Обновление правил турнира"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                await db.execute('''
+                    UPDATE tournaments SET rules = ? WHERE id = ?
+                ''', (rules, tournament_id))
+                
+                await db.commit()
+                logger.info(f"Правила турнира {tournament_id} обновлены")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении правил турнира: {e}")
             return False
     
     async def delete_tournament(self, tournament_id: int) -> bool:
@@ -524,11 +556,70 @@ class Database:
         """Получение количества матчей в турнире"""
         try:
             async with aiosqlite.connect(self.db_name) as conn:
-                cursor = await conn.execute("SELECT COUNT(*) FROM matches WHERE tournament_id = ? AND is_active = 1", (tournament_id,))
+                cursor = await conn.execute(
+                    "SELECT COUNT(*) FROM matches WHERE tournament_id = ? AND is_active = 1", 
+                    (tournament_id,)
+                )
                 result = await cursor.fetchone()
                 return result[0] if result else 0
         except Exception as e:
             logger.error(f"Ошибка при получении количества матчей: {e}")
+            return 0
+
+    # ========== МЕТОДЫ ДЛЯ УЧАСТИЯ В ТУРНИРАХ ==========
+    
+    async def add_tournament_participant(self, user_id: int, tournament_id: int, is_participating: bool) -> bool:
+        """Добавление/обновление участия пользователя в турнире"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                await db.execute('''
+                    INSERT OR REPLACE INTO tournament_participants 
+                    (user_id, tournament_id, is_participating) 
+                    VALUES (?, ?, ?)
+                ''', (user_id, tournament_id, 1 if is_participating else 0))
+                
+                await db.commit()
+                status = "участвует" if is_participating else "отказался"
+                logger.info(f"Пользователь {user_id} {status} в турнире {tournament_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Ошибка при добавлении участника турнира: {e}")
+            return False
+    
+    async def get_tournament_participation(self, user_id: int, tournament_id: int) -> Optional[Dict[str, Any]]:
+        """Получение информации об участии пользователя в турнире"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute('''
+                    SELECT * FROM tournament_participants 
+                    WHERE user_id = ? AND tournament_id = ?
+                ''', (user_id, tournament_id))
+                
+                participation = await cursor.fetchone()
+                return dict(participation) if participation else None
+        except Exception as e:
+            logger.error(f"Ошибка при получении участия в турнире: {e}")
+            return None
+    
+    async def is_user_participating(self, user_id: int, tournament_id: int) -> bool:
+        """Проверка, участвует ли пользователь в турнире"""
+        participation = await self.get_tournament_participation(user_id, tournament_id)
+        return participation and participation.get('is_participating', False)
+    
+    async def get_tournament_participants_count(self, tournament_id: int) -> int:
+        """Получение количества участников турнира"""
+        try:
+            async with aiosqlite.connect(self.db_name) as conn:
+                cursor = await conn.execute(
+                    "SELECT COUNT(*) FROM tournament_participants WHERE tournament_id = ? AND is_participating = 1", 
+                    (tournament_id,)
+                )
+                result = await cursor.fetchone()
+                return result[0] if result else 0
+        except Exception as e:
+            logger.error(f"Ошибка при получении количества участников: {e}")
             return 0
 
 # Создаем экземпляр базы данных

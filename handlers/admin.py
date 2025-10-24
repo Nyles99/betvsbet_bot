@@ -605,6 +605,7 @@ async def admin_back(callback: types.CallbackQuery):
     if not await check_admin_access(callback.message):
         return
     
+    # Просто вызываем команду админ-панели заново
     await cmd_admin(callback.message)
     await callback.answer()
 
