@@ -1,14 +1,18 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
-from config import config
+from config_bot import config
 from database import db
 from handlers.start import register_handlers_start
 from handlers.registration import register_handlers_registration
 from handlers.login import register_handlers_login
 from handlers.profile import register_handlers_profile
+from handlers.admin import register_handlers_admin
+from handlers.tournaments import register_handlers_tournaments
+from handlers.info import register_handlers_info
+from handlers.matches import register_handlers_matches
 
 # Настройка логирования
 logging.basicConfig(
@@ -33,11 +37,20 @@ async def main():
     await db.create_tables()
     logger.info("База данных инициализирована")
     
+    # Создаем администратора
+    if config.ADMIN_ID:
+        await db.create_admin_user(config.ADMIN_ID)
+        logger.info(f"Администратор с ID {config.ADMIN_ID} создан/проверен")
+    
     # Регистрируем обработчики
     register_handlers_start(dp)
     register_handlers_registration(dp)
     register_handlers_login(dp)
     register_handlers_profile(dp)
+    register_handlers_admin(dp)
+    register_handlers_tournaments(dp)
+    register_handlers_info(dp)
+    register_handlers_matches(dp)
     
     # Обработчик неизвестных команд
     @dp.message_handler()
@@ -46,7 +59,8 @@ async def main():
             "🤔 Я не понимаю эту команду.\n\n"
             "Используйте кнопки меню или команды:\n"
             "/start - начать работу\n"
-            "/help - помощь"
+            "/help - помощь\n"
+            "/admin - админ-панель (только для администраторов)"
         )
     
     # Запускаем бота
