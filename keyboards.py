@@ -53,11 +53,13 @@ def get_profile_keyboard():
     edit_email_btn = InlineKeyboardButton('✏️ Email', callback_data='edit_email')
     edit_phone_btn = InlineKeyboardButton('✏️ Телефон', callback_data='edit_phone')
     edit_name_btn = InlineKeyboardButton('✏️ ФИО', callback_data='edit_name')
+    user_tournaments_btn = InlineKeyboardButton('📊 Идущие турниры', callback_data='user_tournaments')
     change_password_btn = InlineKeyboardButton('🔑 Пароль', callback_data='change_password')
     back_btn = InlineKeyboardButton('🔙 Назад', callback_data='back_to_main')
     
     keyboard.add(edit_username_btn, edit_email_btn)
     keyboard.add(edit_phone_btn, edit_name_btn)
+    keyboard.add(user_tournaments_btn)
     keyboard.add(change_password_btn)
     keyboard.add(back_btn)
     
@@ -294,4 +296,175 @@ def get_tournament_edit_rules_keyboard(tournament_id: int):
     cancel_btn = InlineKeyboardButton('❌ Отмена', callback_data=f'tournament_rules_{tournament_id}')
     
     keyboard.add(save_btn, cancel_btn)
+    return keyboard
+
+# ========== КЛАВИАТУРЫ ДЛЯ СТАВОК ==========
+
+def get_score_keyboard(match_id: int):
+    """Клавиатура с вариантами счета для матча"""
+    keyboard = InlineKeyboardMarkup(row_width=5)
+    
+    # Основные варианты счетов
+    scores = [
+        "0-0", "1-0", "2-0", "3-0", "4-0", "5-0",
+        "0-1", "0-2", "0-3", "0-4", "0-5", 
+        "1-1", "2-1", "3-1", "4-1", "5-1",
+        "1-2", "1-3", "1-4", "1-5",
+        "2-2", "3-2", "4-2", "5-2",
+        "2-3", "2-4", "2-5",
+        "3-3", "4-3", "5-3",
+        "3-4", "3-5",
+        "4-4", "5-4",
+        "4-5", "5-5"
+    ]
+    
+    # Создаем кнопки для каждого счета
+    buttons = []
+    for score in scores:
+        buttons.append(InlineKeyboardButton(
+            score, 
+            callback_data=f'bet_{match_id}_{score}'
+        ))
+    
+    # Добавляем кнопки по 5 в ряд
+    for i in range(0, len(buttons), 5):
+        keyboard.row(*buttons[i:i+5])
+    
+    # Кнопка отмены
+    cancel_btn = InlineKeyboardButton('❌ Отмена', callback_data=f'cancel_bet_{match_id}')
+    keyboard.add(cancel_btn)
+    
+    return keyboard
+
+def get_user_tournaments_keyboard():
+    """Клавиатура для раздела 'Идущие турниры' в личном кабинете"""
+    keyboard = InlineKeyboardMarkup()
+    
+    my_bets_btn = InlineKeyboardButton('📊 Мои ставки', callback_data='my_bets')
+    back_btn = InlineKeyboardButton('🔙 Назад', callback_data='back_to_profile')
+    
+    keyboard.add(my_bets_btn)
+    keyboard.add(back_btn)
+    
+    return keyboard
+
+def get_bets_back_keyboard():
+    """Клавиатура для возврата из раздела ставок"""
+    keyboard = InlineKeyboardMarkup()
+    back_btn = InlineKeyboardButton('🔙 Назад', callback_data='back_to_profile')
+    keyboard.add(back_btn)
+    return keyboard
+
+def get_match_details_keyboard(match_id: int, has_bet: bool = False, show_next: bool = False):
+    """Клавиатура для деталей матча"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    if not has_bet:
+        make_bet_btn = InlineKeyboardButton('🎯 Сделать ставку', callback_data=f'match_{match_id}')
+        keyboard.add(make_bet_btn)
+    
+    if show_next:
+        next_match_btn = InlineKeyboardButton('➡️ Следующий матч', callback_data=f'next_match_{match_id}')
+        keyboard.add(next_match_btn)
+    
+    view_bets_btn = InlineKeyboardButton('📊 Посмотреть ставки', callback_data=f'view_bets_{match_id}')
+    back_btn = InlineKeyboardButton('🔙 Назад к турниру', callback_data=f'tournament_back_{match_id}')
+    
+    keyboard.add(view_bets_btn)
+    keyboard.add(back_btn)
+    
+    return keyboard
+
+def get_bet_confirmation_keyboard(match_id: int, score: str):
+    """Клавиатура подтверждения ставки"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    confirm_btn = InlineKeyboardButton('✅ Подтвердить', callback_data=f'confirm_bet_{match_id}_{score}')
+    change_btn = InlineKeyboardButton('✏️ Изменить', callback_data=f'match_{match_id}')
+    cancel_btn = InlineKeyboardButton('❌ Отмена', callback_data=f'cancel_bet_{match_id}')
+    
+    keyboard.add(confirm_btn, change_btn)
+    keyboard.add(cancel_btn)
+    
+    return keyboard
+
+def get_edit_bet_keyboard(match_id: int):
+    """Клавиатура для редактирования ставки"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    edit_btn = InlineKeyboardButton('✏️ Изменить ставку', callback_data=f'match_{match_id}')
+    delete_btn = InlineKeyboardButton('🗑 Удалить ставку', callback_data=f'delete_bet_{match_id}')
+    back_btn = InlineKeyboardButton('🔙 Назад', callback_data='my_bets')
+    
+    keyboard.add(edit_btn, delete_btn)
+    keyboard.add(back_btn)
+    
+    return keyboard
+
+def get_bets_list_keyboard(bets: list):
+    """Клавиатура со списком ставок пользователя"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    
+    for bet in bets:
+        match_info = f"{bet['team1']} vs {bet['team2']}"
+        btn_text = f"{bet['match_date']} {match_info}"
+        
+        btn = InlineKeyboardButton(
+            btn_text, 
+            callback_data=f'view_bet_{bet["id"]}'
+        )
+        keyboard.add(btn)
+    
+    back_btn = InlineKeyboardButton('🔙 Назад', callback_data='user_tournaments_back')
+    keyboard.add(back_btn)
+    
+    return keyboard
+
+def get_bet_actions_keyboard(bet_id: int, match_id: int):
+    """Клавиатура действий со ставкой"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    edit_btn = InlineKeyboardButton('✏️ Изменить', callback_data=f'edit_bet_{bet_id}')
+    delete_btn = InlineKeyboardButton('🗑 Удалить', callback_data=f'delete_bet_{match_id}')
+    back_btn = InlineKeyboardButton('🔙 Назад', callback_data='my_bets')
+    
+    keyboard.add(edit_btn, delete_btn)
+    keyboard.add(back_btn)
+    
+    return keyboard
+
+def get_back_to_tournament_keyboard(tournament_id: int):
+    """Клавиатура для возврата к турниру после всех ставок"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    tournament_btn = InlineKeyboardButton('⚽ К турниру', callback_data=f'tournament_matches_{tournament_id}')
+    profile_btn = InlineKeyboardButton('👤 В личный кабинет', callback_data='back_to_main')
+    
+    keyboard.add(tournament_btn, profile_btn)
+    return keyboard
+
+def get_bet_stats_keyboard(match_id: int, is_admin: bool = False):
+    """Клавиатура для статистики ставок на матч"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    if is_admin:
+        admin_stats_btn = InlineKeyboardButton('👑 Статистика админа', callback_data=f'admin_bets_{match_id}')
+        keyboard.add(admin_stats_btn)
+    
+    back_btn = InlineKeyboardButton('🔙 Назад', callback_data=f'match_{match_id}')
+    keyboard.add(back_btn)
+    
+    return keyboard
+
+def get_admin_bets_keyboard(match_id: int):
+    """Клавиатура для админ-управления ставками"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    view_all_btn = InlineKeyboardButton('📊 Все ставки', callback_data=f'admin_view_bets_{match_id}')
+    clear_bets_btn = InlineKeyboardButton('🗑 Очистить ставки', callback_data=f'admin_clear_bets_{match_id}')
+    back_btn = InlineKeyboardButton('🔙 Назад', callback_data=f'admin_matches')
+    
+    keyboard.add(view_all_btn, clear_bets_btn)
+    keyboard.add(back_btn)
+    
     return keyboard

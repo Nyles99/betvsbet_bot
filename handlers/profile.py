@@ -4,7 +4,14 @@ from aiogram.types import ReplyKeyboardRemove
 
 from database import db
 from states import ProfileStates
-from keyboards import get_profile_keyboard, get_back_keyboard, get_main_menu, get_cancel_keyboard
+from keyboards import (
+    get_profile_keyboard, 
+    get_back_keyboard, 
+    get_main_menu, 
+    get_cancel_keyboard,
+    get_user_tournaments_keyboard,
+    get_bets_back_keyboard
+)
 from utils import validate_username, validate_email, validate_phone, validate_full_name
 
 async def process_profile_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -70,6 +77,10 @@ async def process_profile_callback(callback: types.CallbackQuery, state: FSMCont
         )
         await ProfileStates.editing_full_name.set()
         
+    elif action == 'user_tournaments':
+        # Новая кнопка - Идущие турниры
+        await show_user_tournaments_section(callback)
+        
     elif action == 'change_password':
         await callback.message.answer(
             "🔑 *Изменение пароля*\n\n"
@@ -80,11 +91,162 @@ async def process_profile_callback(callback: types.CallbackQuery, state: FSMCont
         )
         
     elif action == 'back_to_main':
-        await callback.message.answer(
+        await callback.message.edit_text(
             "Возвращаемся в главное меню...",
+            reply_markup=None
+        )
+        await callback.message.answer(
+            "Главное меню:",
             reply_markup=get_main_menu()
         )
     
+    await callback.answer()
+
+async def show_user_tournaments_section(callback: types.CallbackQuery):
+    """Показать раздел 'Идущие турниры' в личном кабинете"""
+    user_id = callback.from_user.id
+    
+    # Получаем количество ставок пользователя
+    bets_count = await db.get_user_bets_count(user_id)
+    user_data = await db.get_user_by_id(user_id)
+    
+    if not user_data:
+        await callback.answer("❌ Ошибка: пользователь не найден")
+        return
+    
+    section_text = (
+        "📊 *Идущие турниры*\n\n"
+        f"👋 Привет, {user_data['full_name']}!\n\n"
+        f"🎯 У вас сделано ставок: **{bets_count}**\n\n"
+        "В этом разделе вы можете:\n"
+        "• Просмотреть все ваши ставки\n"
+        "• Увидеть прогнозы на матчи\n"
+        "• Следить за активными турнирами\n\n"
+        "Выберите действие:"
+    )
+    
+    await callback.message.edit_text(
+        section_text,
+        parse_mode="Markdown",
+        reply_markup=get_user_tournaments_keyboard()
+    )
+
+async def show_my_bets(callback: types.CallbackQuery):
+    """Показать все ставки пользователя"""
+    user_id = callback.from_user.id
+    user_bets = await db.get_user_bets(user_id)
+    
+    if not user_bets:
+        await callback.message.edit_text(
+            "📭 *У вас пока нет ставок*\n\n"
+            "Чтобы сделать ставку:\n"
+            "1. Перейдите в раздел '⚽ Турниры'\n"
+            "2. Выберите турнир\n" 
+            "3. Выберите матч для прогнозирования счета\n"
+            "4. Сделайте ставку из предложенных вариантов\n\n"
+            "🎯 Ставки помогают участвовать в тотализаторе и соревноваться с другими участниками!",
+            parse_mode="Markdown",
+            reply_markup=get_bets_back_keyboard()
+        )
+    else:
+        # Группируем ставки по турнирам
+        tournaments_bets = {}
+        for bet in user_bets:
+            tournament_name = bet['tournament_name']
+            if tournament_name not in tournaments_bets:
+                tournaments_bets[tournament_name] = []
+            tournaments_bets[tournament_name].append(bet)
+        
+        bets_text = "📊 *Ваши ставки по турнирам:*\n\n"
+        
+        for tournament_name, bets in tournaments_bets.items():
+            bets_text += f"🏆 *{tournament_name}* ({len(bets)} ставок):\n"
+            
+            for i, bet in enumerate(bets, 1):
+                bets_text += (
+                    f"  {i}. {bet['team1']} vs {bet['team2']}\n"
+                    f"      🎯 {bet['team1_score']}-{bet['team2_score']}\n"
+                    f"      📅 {bet['match_date']} {bet['match_time']}\n"
+                )
+            
+            bets_text += "\n"
+        
+        bets_text += f"📈 Всего ставок: **{len(user_bets)}**"
+        
+        await callback.message.edit_text(
+            bets_text,
+            parse_mode="Markdown",
+            reply_markup=get_bets_back_keyboard()
+        )
+    
+    await callback.answer()
+
+async def user_tournaments_back(callback: types.CallbackQuery):
+    """Возврат из раздела ставок в личный кабинет"""
+    user_id = callback.from_user.id
+    user_data = await db.get_user_by_id(user_id)
+    
+    if not user_data:
+        await callback.answer("❌ Ошибка: пользователь не найден")
+        return
+    
+    # Получаем статистику пользователя
+    bets_count = await db.get_user_bets_count(user_id)
+    tournaments_count = await db.get_tournaments_count()
+    
+    profile_text = (
+        "👤 *Ваш профиль:*\n\n"
+        f"🔑 *Логин:* `{user_data['username']}`\n"
+        f"📧 *Email:* `{user_data['email']}`\n"
+        f"📞 *Телефон:* `{user_data['phone'] or 'Не указан'}`\n"
+        f"👨‍💼 *ФИО:* {user_data['full_name']}\n"
+        f"📅 *Дата регистрации:* {user_data['registration_date'][:10]}\n"
+        f"🕒 *Последнее обновление:* {user_data['last_login'][:16]}\n\n"
+        f"📊 *Статистика:*\n"
+        f"• Сделано ставок: **{bets_count}**\n"
+        f"• Активных турниров: **{tournaments_count}**\n\n"
+        "Выберите что хотите изменить:"
+    )
+    
+    await callback.message.edit_text(
+        profile_text,
+        parse_mode="Markdown",
+        reply_markup=get_profile_keyboard()
+    )
+    await callback.answer()
+
+async def show_profile_from_callback(callback: types.CallbackQuery):
+    """Показать личный кабинет из callback"""
+    user_id = callback.from_user.id
+    user_data = await db.get_user_by_id(user_id)
+    
+    if not user_data:
+        await callback.answer("❌ Ошибка: пользователь не найден")
+        return
+    
+    # Получаем статистику пользователя
+    bets_count = await db.get_user_bets_count(user_id)
+    tournaments_count = await db.get_tournaments_count()
+    
+    profile_text = (
+        "👤 *Ваш профиль:*\n\n"
+        f"🔑 *Логин:* `{user_data['username']}`\n"
+        f"📧 *Email:* `{user_data['email']}`\n"
+        f"📞 *Телефон:* `{user_data['phone'] or 'Не указан'}`\n"
+        f"👨‍💼 *ФИО:* {user_data['full_name']}\n"
+        f"📅 *Дата регистрации:* {user_data['registration_date'][:10]}\n"
+        f"🕒 *Последний вход:* {user_data['last_login'][:16]}\n\n"
+        f"📊 *Статистика:*\n"
+        f"• Сделано ставок: **{bets_count}**\n"
+        f"• Активных турниров: **{tournaments_count}**\n\n"
+        "Используйте кнопки ниже для редактирования данных:"
+    )
+    
+    await callback.message.edit_text(
+        profile_text,
+        parse_mode="Markdown",
+        reply_markup=get_profile_keyboard()
+    )
     await callback.answer()
 
 async def process_edit_username(message: types.Message, state: FSMContext):
@@ -95,7 +257,7 @@ async def process_edit_username(message: types.Message, state: FSMContext):
             "Изменение логина отменено.",
             reply_markup=ReplyKeyboardRemove()
         )
-        await message.answer("Выберите действие:", reply_markup=get_profile_keyboard())
+        await show_updated_profile(message)
         return
     
     new_username = message.text.strip()
@@ -142,7 +304,7 @@ async def process_edit_email(message: types.Message, state: FSMContext):
             "Изменение email отменено.",
             reply_markup=ReplyKeyboardRemove()
         )
-        await message.answer("Выберите действие:", reply_markup=get_profile_keyboard())
+        await show_updated_profile(message)
         return
     
     new_email = message.text.strip().lower()
@@ -188,7 +350,7 @@ async def process_edit_phone(message: types.Message, state: FSMContext):
             "Изменение телефона отменено.",
             reply_markup=ReplyKeyboardRemove()
         )
-        await message.answer("Выберите действие:", reply_markup=get_profile_keyboard())
+        await show_updated_profile(message)
         return
     
     new_phone = message.text.strip()
@@ -238,7 +400,7 @@ async def process_edit_full_name(message: types.Message, state: FSMContext):
             "Изменение ФИО отменено.",
             reply_markup=ReplyKeyboardRemove()
         )
-        await message.answer("Выберите действие:", reply_markup=get_profile_keyboard())
+        await show_updated_profile(message)
         return
     
     new_full_name = message.text.strip()
@@ -273,6 +435,10 @@ async def show_updated_profile(message: types.Message):
     user_data = await db.get_user_by_id(user_id)
     
     if user_data:
+        # Получаем статистику пользователя
+        bets_count = await db.get_user_bets_count(user_id)
+        tournaments_count = await db.get_tournaments_count()
+        
         profile_text = (
             "👤 *Обновленный профиль:*\n\n"
             f"🔑 *Логин:* `{user_data['username']}`\n"
@@ -281,6 +447,9 @@ async def show_updated_profile(message: types.Message):
             f"👨‍💼 *ФИО:* {user_data['full_name']}\n"
             f"📅 *Дата регистрации:* {user_data['registration_date'][:10]}\n"
             f"🕒 *Последнее обновление:* {user_data['last_login'][:16]}\n\n"
+            f"📊 *Статистика:*\n"
+            f"• Сделано ставок: **{bets_count}**\n"
+            f"• Активных турниров: **{tournaments_count}**\n\n"
             "Выберите что хотите изменить:"
         )
         
@@ -291,15 +460,73 @@ async def show_updated_profile(message: types.Message):
             reply_markup=get_main_menu()
         )
 
+async def show_profile(message: types.Message):
+    """Показать личный кабинет (обработчик кнопки из главного меню)"""
+    user_id = message.from_user.id
+    user_data = await db.get_user_by_id(user_id)
+    
+    if not user_data:
+        await message.answer(
+            "❌ Вы не зарегистрированы!\n"
+            "Пройдите регистрацию для доступа к личному кабинету.",
+            reply_markup=get_main_menu()
+        )
+        return
+    
+    # Получаем статистику пользователя
+    bets_count = await db.get_user_bets_count(user_id)
+    tournaments_count = await db.get_tournaments_count()
+    
+    profile_text = (
+        "👤 *Ваш профиль:*\n\n"
+        f"🔑 *Логин:* `{user_data['username']}`\n"
+        f"📧 *Email:* `{user_data['email']}`\n"
+        f"📞 *Телефон:* `{user_data['phone'] or 'Не указан'}`\n"
+        f"👨‍💼 *ФИО:* {user_data['full_name']}\n"
+        f"📅 *Дата регистрации:* {user_data['registration_date'][:10]}\n"
+        f"🕒 *Последний вход:* {user_data['last_login'][:16]}\n\n"
+        f"📊 *Статистика:*\n"
+        f"• Сделано ставок: **{bets_count}**\n"
+        f"• Активных турниров: **{tournaments_count}**\n\n"
+        "Используйте кнопки ниже для редактирования данных:"
+    )
+    
+    await message.answer(profile_text, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Выберите что хотите изменить:", reply_markup=get_profile_keyboard())
+
 def register_handlers_profile(dp: Dispatcher):
     """Регистрация обработчиков профиля"""
+    # Обработчик кнопки "Личный кабинет" из главного меню
+    dp.register_message_handler(
+        show_profile, 
+        lambda message: message.text == "👤 Личный кабинет",
+        state="*"
+    )
+    
+    # Обработчик callback для личного кабинета
+    dp.register_callback_query_handler(
+        show_profile_from_callback,
+        lambda c: c.data == 'back_to_profile',
+        state="*"
+    )
+    
     # Обработчик инлайн кнопок профиля
     dp.register_callback_query_handler(
         process_profile_callback,
         lambda c: c.data in [
             'edit_username', 'edit_email', 'edit_phone', 'edit_name',
-            'change_password', 'back_to_main'
+            'user_tournaments', 'change_password', 'back_to_main'
         ]
+    )
+    
+    # Обработчики раздела "Идущие турниры"
+    dp.register_callback_query_handler(
+        show_my_bets,
+        lambda c: c.data == 'my_bets'
+    )
+    dp.register_callback_query_handler(
+        user_tournaments_back,
+        lambda c: c.data == 'user_tournaments_back'
     )
     
     # Обработчики состояний редактирования профиля

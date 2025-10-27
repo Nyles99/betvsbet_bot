@@ -10,7 +10,7 @@ class Config:
     """Класс для хранения конфигурации бота"""
     BOT_TOKEN: str = os.getenv('BOT_TOKEN')
     ADMIN_ID: int = int(os.getenv('ADMIN_ID', 831040832))  # Ваш ID по умолчанию
-    
+    #831040832
     # Настройки базы данных
     DATABASE_NAME: str = 'users.db'
     

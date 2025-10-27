@@ -1,7 +1,6 @@
 from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
 from aiogram.types import ReplyKeyboardRemove
-import re
 
 from database import db
 from states import RegistrationStates
@@ -23,7 +22,7 @@ async def start_registration(message: types.Message):
     
     await message.answer(
         "📝 *Начинаем регистрацию!*\n\n"
-        "Шаг 1 из 4:\n"
+        "Шаг 1 из 5:\n"
         "Придумайте и введите *логин* для входа:\n\n"
         "✅ *Можно:* буквы, цифры, подчеркивание\n"
         "❌ *Нельзя:* пробелы, спецсимволы\n"
@@ -36,7 +35,7 @@ async def start_registration(message: types.Message):
     await RegistrationStates.waiting_for_username.set()
 
 async def process_username(message: types.Message, state: FSMContext):
-    """Обработка ввода логина"""
+    """Обработка ввода логина - Шаг 1"""
     username = message.text.strip()
     
     # Проверяем, не нажата ли кнопка "Назад"
@@ -67,19 +66,20 @@ async def process_username(message: types.Message, state: FSMContext):
     
     await message.answer(
         "✅ Логин принят!\n\n"
-        "Шаг 2 из 4:\n"
+        "Шаг 2 из 5:\n"
         "Введите ваш *пароль*:\n\n"
         "⚠️ *Рекомендации:*\n"
         "• Минимум 6 символов\n"
         "• Буквы и цифры\n"
         "• Пароль будет надежно защищен",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=get_back_keyboard()
     )
     
-    await RegistrationStates.waiting_for_full_name.set()
+    await RegistrationStates.waiting_for_password.set()
 
 async def process_password(message: types.Message, state: FSMContext):
-    """Обработка ввода пароля"""
+    """Обработка ввода пароля - Шаг 2"""
     password = message.text.strip()
     
     # Проверяем, не нажата ли кнопка "Назад"
@@ -105,22 +105,23 @@ async def process_password(message: types.Message, state: FSMContext):
     
     await message.answer(
         "✅ Пароль принят!\n\n"
-        "Шаг 3 из 4:\n"
+        "Шаг 3 из 5:\n"
         "Введите ваше *ФИО* (Фамилия Имя Отчество):\n\n"
         "Пример: *Иванов Иван Иванович*",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=get_back_keyboard()
     )
     
-    await RegistrationStates.waiting_for_email.set()
+    await RegistrationStates.waiting_for_full_name.set()
 
 async def process_full_name(message: types.Message, state: FSMContext):
-    """Обработка ввода ФИО"""
+    """Обработка ввода ФИО - Шаг 3"""
     full_name = message.text.strip()
     
     # Проверяем, не нажата ли кнопка "Назад"
     if message.text == "🔙 Назад":
         await message.answer("Введите пароль:")
-        await RegistrationStates.waiting_for_full_name.set()
+        await RegistrationStates.waiting_for_password.set()
         return
     
     # Валидируем ФИО
@@ -134,22 +135,23 @@ async def process_full_name(message: types.Message, state: FSMContext):
     
     await message.answer(
         "✅ ФИО принято!\n\n"
-        "Шаг 4 из 4:\n"
+        "Шаг 4 из 5:\n"
         "Введите ваш *email*:\n\n"
         "Пример: *example@mail.ru*",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=get_back_keyboard()
     )
     
-    await RegistrationStates.waiting_for_phone.set()
+    await RegistrationStates.waiting_for_email.set()
 
 async def process_email(message: types.Message, state: FSMContext):
-    """Обработка ввода email"""
+    """Обработка ввода email - Шаг 4"""
     email = message.text.strip().lower()
     
     # Проверяем, не нажата ли кнопка "Назад"
     if message.text == "🔙 Назад":
         await message.answer("Введите ФИО:")
-        await RegistrationStates.waiting_for_email.set()
+        await RegistrationStates.waiting_for_full_name.set()
         return
     
     # Валидируем email
@@ -179,15 +181,17 @@ async def process_email(message: types.Message, state: FSMContext):
         parse_mode="Markdown",
         reply_markup=get_phone_keyboard()
     )
+    
+    await RegistrationStates.waiting_for_phone.set()
 
 async def process_phone_message(message: types.Message, state: FSMContext):
-    """Обработка ввода телефона текстом"""
+    """Обработка ввода телефона текстом - Шаг 5"""
     phone = message.text.strip()
     
     # Проверяем, не нажата ли кнопка "Назад"
     if message.text == "🔙 Назад":
         await message.answer("Введите email:")
-        await RegistrationStates.waiting_for_phone.set()
+        await RegistrationStates.waiting_for_email.set()
         return
     
     # Валидируем телефон
@@ -216,7 +220,7 @@ async def process_phone_message(message: types.Message, state: FSMContext):
     await complete_registration(message, state)
 
 async def process_phone_contact(message: types.Message, state: FSMContext):
-    """Обработка отправки контакта"""
+    """Обработка отправки контакта - Шаг 5"""
     if message.contact:
         phone = message.contact.phone_number
         
@@ -269,9 +273,9 @@ async def complete_registration(message: types.Message, state: FSMContext):
         email=email,
         phone=phone,
         full_name=full_name,
-        tg_username=user.username,
-        tg_first_name=user.first_name,
-        tg_last_name=user.last_name
+        tg_username=user.username or '',
+        tg_first_name=user.first_name or '',
+        tg_last_name=user.last_name or ''
     )
     
     if result is True:
@@ -321,15 +325,15 @@ def register_handlers_registration(dp: Dispatcher):
     )
     dp.register_message_handler(
         process_password, 
-        state=RegistrationStates.waiting_for_full_name
+        state=RegistrationStates.waiting_for_password
     )
     dp.register_message_handler(
         process_full_name, 
-        state=RegistrationStates.waiting_for_email
+        state=RegistrationStates.waiting_for_full_name
     )
     dp.register_message_handler(
         process_email, 
-        state=RegistrationStates.waiting_for_phone
+        state=RegistrationStates.waiting_for_email
     )
     dp.register_message_handler(
         process_phone_message, 

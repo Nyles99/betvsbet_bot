@@ -55,10 +55,13 @@ async def show_tournaments(message: types.Message):
         return
     
     admin_status = is_admin(user_id)
+    tournaments_count = await db.get_tournaments_count()
+    
     await message.answer(
         "⚽ *Футбольные турниры*\n\n"
-        "Здесь вы можете просматривать доступные турниры по футболу.\n\n"
-        f"📊 Активных турниров: {await db.get_tournaments_count()}",
+        "Здесь вы можете просматривать доступные турниры по футболу, "
+        "участвовать в них и делать ставки на матчи.\n\n"
+        f"📊 Активных турниров: **{tournaments_count}**",
         parse_mode="Markdown",
         reply_markup=types.ReplyKeyboardRemove()
     )
@@ -82,16 +85,20 @@ async def show_tournaments_list(callback: types.CallbackQuery):
     if not tournaments:
         await callback.message.edit_text(
             "📭 На данный момент нет активных турниров.\n\n"
-            "Следите за обновлениями!",
+            "Следите за обновлениями! Новые турниры появятся скоро.",
             reply_markup=get_tournaments_keyboard(admin_status)
         )
     else:
         tournaments_text = "📋 *Список турниров:*\n\n"
         for i, tournament in enumerate(tournaments, 1):
+            # Получаем количество матчей в турнире
+            matches_count = await db.get_matches_count_by_tournament(tournament['id'])
+            
             tournaments_text += (
-                f"{i}. *{tournament['name']}*\n"
+                f"**{i}. {tournament['name']}**\n"
                 f"   📝 {tournament.get('description', 'Описание отсутствует')}\n"
                 f"   👤 Создал: {tournament.get('created_by_username', 'Админ')}\n"
+                f"   🔢 Матчей: {matches_count}\n"
                 f"   📅 {tournament['created_date'][:10]}\n\n"
             )
         
@@ -128,14 +135,18 @@ async def show_tournament_detail(callback: types.CallbackQuery):
         await show_tournament_matches(callback, tournament_id)
     else:
         # Предлагаем участие в турнире
+        matches_count = await db.get_matches_count_by_tournament(tournament_id)
+        
         tournament_text = (
             f"⚽ *{tournament['name']}*\n\n"
-            f"📝 *Описание:* {tournament.get('description', 'Отсутствует')}\n\n"
+            f"📝 *Описание:* {tournament.get('description', 'Отсутствует')}\n"
+            f"🔢 *Матчей в турнире:* {matches_count}\n\n"
             "❓ *Вы готовы принять участие в этом турнире?*\n\n"
             "После подтверждения участия вы сможете:\n"
             "• Просматривать матчи турнира\n"
-            "• Видеть правила турнира\n"
-            "• Участвовать в тотализаторе\n\n"
+            "• Делать ставки на результаты\n"
+            "• Участвовать в тотализаторе\n"
+            "• Следить за своей статистикой\n\n"
             "Выберите действие:"
         )
         
@@ -163,6 +174,7 @@ async def show_tournament_matches(callback: types.CallbackQuery, tournament_id: 
     # Получаем матчи турнира
     matches = await db.get_matches_by_tournament(tournament_id)
     is_admin_user = is_admin(callback.from_user.id)
+    user_id = callback.from_user.id
     
     # Формируем текст сообщения
     tournament_text = (
@@ -174,9 +186,17 @@ async def show_tournament_matches(callback: types.CallbackQuery, tournament_id: 
     if matches:
         tournament_text += "📋 *Список матчей:*\n\n"
         for i, match in enumerate(matches, 1):
-            tournament_text += f"{i}. {match['match_date']} {match['match_time']} {match['team1']} - {match['team2']}\n"
+            # Проверяем, сделал ли пользователь ставку на этот матч
+            user_bet = await db.get_match_bet(user_id, match['id'])
+            bet_status = " ✅" if user_bet else ""
+            
+            tournament_text += f"{i}. {match['match_date']} {match['match_time']} {match['team1']} - {match['team2']}{bet_status}\n"
+        
+        tournament_text += "\n✅ - ставка сделана"
     else:
         tournament_text += "📭 В этом турнире пока нет матчей.\n"
+        if is_admin_user:
+            tournament_text += "\nВы можете добавить матчи используя кнопку ниже."
     
     keyboard = get_tournament_matches_keyboard(matches, tournament_id, is_admin_user)
     
@@ -189,9 +209,10 @@ async def show_tournament_matches(callback: types.CallbackQuery, tournament_id: 
 async def participate_tournament(callback: types.CallbackQuery):
     """Пользователь соглашается участвовать в турнире"""
     tournament_id = int(callback.data.split('_')[1])
+    user_id = callback.from_user.id
     
     # Сохраняем участие пользователя
-    success = await db.add_tournament_participant(callback.from_user.id, tournament_id, True)
+    success = await db.add_tournament_participant(user_id, tournament_id, True)
     
     if success:
         await callback.answer("✅ Вы успешно присоединились к турниру!")
@@ -202,9 +223,10 @@ async def participate_tournament(callback: types.CallbackQuery):
 async def decline_tournament(callback: types.CallbackQuery):
     """Пользователь отказывается от участия в турнире"""
     tournament_id = int(callback.data.split('_')[1])
+    user_id = callback.from_user.id
     
     # Сохраняем отказ пользователя
-    success = await db.add_tournament_participant(callback.from_user.id, tournament_id, False)
+    success = await db.add_tournament_participant(user_id, tournament_id, False)
     
     if success:
         await callback.answer("❌ Вы отказались от участия в турнире")

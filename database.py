@@ -13,6 +13,14 @@ class Database:
     def __init__(self, db_name: str = config.DATABASE_NAME):
         self.db_name = db_name
     
+    def _hash_password(self, password: str, salt: str) -> str:
+        """Хеширование пароля с солью"""
+        return hashlib.sha256((password + salt).encode()).hexdigest()
+    
+    def _generate_salt(self) -> str:
+        """Генерация соли для пароля"""
+        return secrets.token_hex(16)
+    
     async def create_tables(self):
         """Создание таблиц в базе данных"""
         try:
@@ -80,6 +88,21 @@ class Database:
                     )
                 ''')
                 
+                # Таблица ставок на матчи
+                await db.execute('''
+                    CREATE TABLE IF NOT EXISTS match_bets (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        match_id INTEGER NOT NULL,
+                        team1_score INTEGER NOT NULL,
+                        team2_score INTEGER NOT NULL,
+                        bet_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(user_id, match_id),
+                        FOREIGN KEY (user_id) REFERENCES users (user_id),
+                        FOREIGN KEY (match_id) REFERENCES matches (id)
+                    )
+                ''')
+                
                 # Индексы для быстрого поиска
                 await db.execute('CREATE INDEX IF NOT EXISTS idx_username ON users(username)')
                 await db.execute('CREATE INDEX IF NOT EXISTS idx_email ON users(email)')
@@ -91,6 +114,8 @@ class Database:
                 await db.execute('CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(match_date)')
                 await db.execute('CREATE INDEX IF NOT EXISTS idx_participants_user ON tournament_participants(user_id)')
                 await db.execute('CREATE INDEX IF NOT EXISTS idx_participants_tournament ON tournament_participants(tournament_id)')
+                await db.execute('CREATE INDEX IF NOT EXISTS idx_bets_user ON match_bets(user_id)')
+                await db.execute('CREATE INDEX IF NOT EXISTS idx_bets_match ON match_bets(match_id)')
                 
                 await db.commit()
                 logger.info("Таблицы и индексы успешно созданы")
@@ -127,14 +152,6 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при создании администратора: {e}")
             return False
-    
-    def _hash_password(self, password: str, salt: str) -> str:
-        """Хеширование пароля с солью"""
-        return hashlib.sha256((password + salt).encode()).hexdigest()
-    
-    def _generate_salt(self) -> str:
-        """Генерация соли для пароля"""
-        return secrets.token_hex(16)
     
     async def add_user(self, user_id: int, username: str, password: str, 
                       email: str, phone: str, full_name: str,
@@ -620,6 +637,112 @@ class Database:
                 return result[0] if result else 0
         except Exception as e:
             logger.error(f"Ошибка при получении количества участников: {e}")
+            return 0
+
+    # ========== МЕТОДЫ ДЛЯ СТАВОК НА МАТЧИ ==========
+    
+    async def add_match_bet(self, user_id: int, match_id: int, team1_score: int, team2_score: int) -> bool:
+        """Добавление ставки на матч"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                await db.execute('''
+                    INSERT OR REPLACE INTO match_bets 
+                    (user_id, match_id, team1_score, team2_score)
+                    VALUES (?, ?, ?, ?)
+                ''', (user_id, match_id, team1_score, team2_score))
+                
+                await db.commit()
+                logger.info(f"Ставка пользователя {user_id} на матч {match_id}: {team1_score}-{team2_score}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Ошибка при добавлении ставки: {e}")
+            return False
+    
+    async def get_user_bets(self, user_id: int) -> List[Dict[str, Any]]:
+        """Получение всех ставок пользователя с информацией о матчах"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute('''
+                    SELECT mb.*, m.match_date, m.match_time, m.team1, m.team2, 
+                           t.name as tournament_name
+                    FROM match_bets mb
+                    JOIN matches m ON mb.match_id = m.id
+                    JOIN tournaments t ON m.tournament_id = t.id
+                    WHERE mb.user_id = ? AND m.is_active = 1
+                    ORDER BY m.match_date DESC, m.match_time DESC
+                ''', (user_id,))
+                
+                bets = await cursor.fetchall()
+                return [dict(bet) for bet in bets]
+        except Exception as e:
+            logger.error(f"Ошибка при получении ставок пользователя: {e}")
+            return []
+    
+    async def get_match_bet(self, user_id: int, match_id: int) -> Optional[Dict[str, Any]]:
+        """Получение ставки пользователя на конкретный матч"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute('''
+                    SELECT * FROM match_bets 
+                    WHERE user_id = ? AND match_id = ?
+                ''', (user_id, match_id))
+                
+                bet = await cursor.fetchone()
+                return dict(bet) if bet else None
+        except Exception as e:
+            logger.error(f"Ошибка при получении ставки на матч: {e}")
+            return None
+    
+    async def get_bets_by_match(self, match_id: int) -> List[Dict[str, Any]]:
+        """Получение всех ставок на конкретный матч"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute('''
+                    SELECT mb.*, u.username, u.full_name
+                    FROM match_bets mb
+                    JOIN users u ON mb.user_id = u.user_id
+                    WHERE mb.match_id = ?
+                    ORDER BY mb.bet_date DESC
+                ''', (match_id,))
+                
+                bets = await cursor.fetchall()
+                return [dict(bet) for bet in bets]
+        except Exception as e:
+            logger.error(f"Ошибка при получении ставок на матч: {e}")
+            return []
+    
+    async def delete_match_bet(self, user_id: int, match_id: int) -> bool:
+        """Удаление ставки пользователя на матч"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                await db.execute('''
+                    DELETE FROM match_bets 
+                    WHERE user_id = ? AND match_id = ?
+                ''', (user_id, match_id))
+                
+                await db.commit()
+                logger.info(f"Ставка пользователя {user_id} на матч {match_id} удалена")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при удалении ставки: {e}")
+            return False
+    
+    async def get_user_bets_count(self, user_id: int) -> int:
+        """Получение количества ставок пользователя"""
+        try:
+            async with aiosqlite.connect(self.db_name) as conn:
+                cursor = await conn.execute(
+                    "SELECT COUNT(*) FROM match_bets WHERE user_id = ?", 
+                    (user_id,)
+                )
+                result = await cursor.fetchone()
+                return result[0] if result else 0
+        except Exception as e:
+            logger.error(f"Ошибка при получении количества ставок: {e}")
             return 0
 
 # Создаем экземпляр базы данных
