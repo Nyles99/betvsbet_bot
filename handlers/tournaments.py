@@ -89,22 +89,26 @@ async def show_tournaments_list(callback: types.CallbackQuery):
             reply_markup=get_tournaments_keyboard(admin_status)
         )
     else:
-        tournaments_text = "📋 *Список турниров:*\n\n"
+        # Используем простой текст без разметки
+        tournaments_text = "📋 Список турниров:\n\n"
         for i, tournament in enumerate(tournaments, 1):
             # Получаем количество матчей в турнире
             matches_count = await db.get_matches_count_by_tournament(tournament['id'])
             
+            description = tournament.get('description', 'Описание отсутствует')
+            created_by = tournament.get('created_by_username', 'Админ')
+            
             tournaments_text += (
-                f"**{i}. {tournament['name']}**\n"
-                f"   📝 {tournament.get('description', 'Описание отсутствует')}\n"
-                f"   👤 Создал: {tournament.get('created_by_username', 'Админ')}\n"
+                f"{i}. {tournament['name']}\n"
+                f"   📝 {description}\n"
+                f"   👤 Создал: {created_by}\n"
                 f"   🔢 Матчей: {matches_count}\n"
                 f"   📅 {tournament['created_date'][:10]}\n\n"
             )
         
         await callback.message.edit_text(
             tournaments_text,
-            parse_mode="Markdown",
+            parse_mode=None,  # Без разметки
             reply_markup=get_tournaments_list_keyboard(tournaments, admin_status)
         )
     
@@ -161,7 +165,7 @@ async def show_tournament_detail(callback: types.CallbackQuery):
     await callback.answer()
 
 async def show_tournament_matches(callback: types.CallbackQuery, tournament_id: int = None):
-    """Показать матчи турнира (для участников)"""
+    """Показать матчи турнира"""
     if not tournament_id:
         tournament_id = int(callback.data.split('_')[2])
     
@@ -171,40 +175,71 @@ async def show_tournament_matches(callback: types.CallbackQuery, tournament_id: 
         await callback.answer("❌ Турнир не найден!")
         return
     
-    # Получаем матчи турнира
-    matches = await db.get_matches_by_tournament(tournament_id)
+    # Получаем ВСЕ матчи турнира
+    all_matches = await db.get_matches_by_tournament(tournament_id)
     is_admin_user = is_admin(callback.from_user.id)
     user_id = callback.from_user.id
+    
+    # Для администратора показываем ВСЕ матчи
+    if is_admin_user:
+        matches_to_show = all_matches
+        matches_with_bets = []
+    else:
+        # Для обычного пользователя фильтруем матчи
+        matches_to_show = []
+        matches_with_bets = []
+        
+        for match in all_matches:
+            user_bet = await db.get_match_bet(user_id, match['id'])
+            if not user_bet:
+                matches_to_show.append(match)
+            else:
+                matches_with_bets.append(match)
     
     # Формируем текст сообщения
     tournament_text = (
         f"⚽ *{tournament['name']}*\n\n"
         f"📝 *Описание:* {tournament.get('description', 'Отсутствует')}\n"
-        f"🔢 *Количество матчей:* {len(matches)}\n\n"
     )
     
-    if matches:
-        tournament_text += "📋 *Список матчей:*\n\n"
-        for i, match in enumerate(matches, 1):
-            # Проверяем, сделал ли пользователь ставку на этот матч
-            user_bet = await db.get_match_bet(user_id, match['id'])
-            bet_status = " ✅" if user_bet else ""
-            
-            tournament_text += f"{i}. {match['match_date']} {match['match_time']} {match['team1']} - {match['team2']}{bet_status}\n"
-        
-        tournament_text += "\n✅ - ставка сделана"
+    if is_admin_user:
+        tournament_text += f"🔢 *Всего матчей:* {len(all_matches)}\n\n"
+        if all_matches:
+            tournament_text += "📋 *Все матчи турнира:*\n\n"
+            for i, match in enumerate(all_matches, 1):
+                # Для админа показываем дополнительную информацию
+                bets_count = len(await db.get_bets_by_match(match['id']))
+                tournament_text += f"{i}. {match['match_date']} {match['match_time']} {match['team1']} - {match['team2']} (ставок: {bets_count})\n"
     else:
-        tournament_text += "📭 В этом турнире пока нет матчей.\n"
-        if is_admin_user:
-            tournament_text += "\nВы можете добавить матчи используя кнопку ниже."
+        tournament_text += (
+            f"🔢 *Всего матчей в турнире:* {len(all_matches)}\n"
+            f"🎯 *Доступно для ставок:* {len(matches_to_show)}\n"
+            f"✅ *Ставок сделано:* {len(matches_with_bets)}\n\n"
+        )
+        
+        if matches_to_show:
+            tournament_text += "📋 *Матчи для ставок:*\n\n"
+            for i, match in enumerate(matches_to_show, 1):
+                tournament_text += f"{i}. {match['match_date']} {match['match_time']} {match['team1']} - {match['team2']}\n"
+        else:
+            tournament_text += "🎉 *Поздравляем!*\n\n"
+            tournament_text += "Вы сделали ставки на все матчи этого турнира! 🏆\n"
+            tournament_text += "Следите за результатами в личном кабинете.\n\n"
+            tournament_text += f"✅ Вы сделали ставки на {len(matches_with_bets)} матчей"
     
-    keyboard = get_tournament_matches_keyboard(matches, tournament_id, is_admin_user)
+    # Для админа передаем все матчи, для пользователя - только доступные
+    keyboard = get_tournament_matches_keyboard(
+        all_matches if is_admin_user else matches_to_show, 
+        tournament_id, 
+        is_admin_user
+    )
     
     await callback.message.edit_text(
         tournament_text,
         parse_mode="Markdown",
         reply_markup=keyboard
     )
+    await callback.answer()
 
 async def participate_tournament(callback: types.CallbackQuery):
     """Пользователь соглашается участвовать в турнире"""
@@ -479,13 +514,14 @@ async def tournament_manage_detail(callback: types.CallbackQuery):
     # Получаем количество матчей в турнире
     matches_count = await db.get_matches_count_by_tournament(tournament_id)
     
+    # Без разметки
     tournament_text = (
-        f"🛠 *Управление турниром:*\n\n"
-        f"⚽ *Название:* {tournament['name']}\n"
-        f"📝 *Описание:* {tournament.get('description', 'Отсутствует')}\n"
-        f"👤 *Создатель:* {tournament.get('created_by_username', 'Админ')}\n"
-        f"📅 *Дата создания:* {tournament['created_date'][:16]}\n"
-        f"🔢 *Матчей в турнире:* {matches_count}\n\n"
+        f"🛠 Управление турниром:\n\n"
+        f"⚽ Название: {tournament['name']}\n"
+        f"📝 Описание: {tournament.get('description', 'Отсутствует')}\n"
+        f"👤 Создатель: {tournament.get('created_by_username', 'Админ')}\n"
+        f"📅 Дата создания: {tournament['created_date'][:16]}\n"
+        f"🔢 Матчей в турнире: {matches_count}\n\n"
         "Выберите действие:"
     )
     
@@ -494,7 +530,7 @@ async def tournament_manage_detail(callback: types.CallbackQuery):
     
     await callback.message.edit_text(
         tournament_text,
-        parse_mode="Markdown",
+        parse_mode=None,  # Без разметки
         reply_markup=keyboard
     )
     await callback.answer()
@@ -604,66 +640,100 @@ async def tournament_delete(callback: types.CallbackQuery):
     
     await callback.answer()
 
-async def tournaments_back(callback: types.CallbackQuery):
-    """Возврат к меню турниров"""
+async def handle_all_back_buttons(callback: types.CallbackQuery):
+    """Универсальный обработчик кнопок Назад"""
     user_id = callback.from_user.id
-    admin_status = is_admin(user_id)
     
-    await callback.message.edit_text(
-        "⚽ *Футбольные турниры*\n\n"
-        "Выберите действие:",
-        parse_mode="Markdown",
-        reply_markup=get_tournaments_keyboard(admin_status)
-    )
+    # Немедленно отвечаем на callback чтобы убрать "часики"
     await callback.answer()
-
-async def tournaments_manage_back(callback: types.CallbackQuery):
-    """Возврат к управлению турнирами"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Недостаточно прав!")
-        return
     
-    tournaments = await db.get_all_tournaments()
-    
-    await callback.message.edit_text(
-        "🛠 *Управление турнирами*\n\n"
-        "Выберите турнир для управления:",
-        parse_mode="Markdown",
-        reply_markup=get_tournaments_manage_list_keyboard(tournaments)
-    )
-    await callback.answer()
+    try:
+        if callback.data == 'tournaments_back':
+            admin_status = is_admin(user_id)
+            
+            await callback.message.delete()
+            await callback.message.answer(
+                "⚽ Футбольные турниры\n\n"
+                "Выберите действие:",
+                parse_mode=None,
+                reply_markup=get_tournaments_keyboard(admin_status)
+            )
+            return
+        
+        elif callback.data == 'tournaments_manage_back':
+            if not is_admin(user_id):
+                await callback.answer("❌ Недостаточно прав!")
+                return
+            
+            tournaments = await db.get_all_tournaments()
+            
+            await callback.message.delete()
+            await callback.message.answer(
+                "🛠 Управление турнирами\n\n"
+                "Выберите турнир для управления:",
+                parse_mode=None,
+                reply_markup=get_tournaments_manage_list_keyboard(tournaments)
+            )
+            return
+        
+        elif callback.data == 'back_to_main':
+            from keyboards import get_main_menu
+            await callback.message.delete()
+            await callback.message.answer(
+                "Главное меню:",
+                reply_markup=get_main_menu()
+            )
+            return
+        
+        elif callback.data == 'admin_back':
+            from handlers.admin import show_admin_panel
+            await show_admin_panel(callback)
+            return
+        
+    except Exception as e:
+        await callback.message.answer("❌ Произошла ошибка. Попробуйте снова.")
 
 def register_handlers_tournaments(dp: Dispatcher):
     """Регистрация обработчиков турниров"""
-    # Обработчик кнопки "Турниры"
+    
+    # Обработчик кнопки "Турниры" из главного меню
     dp.register_message_handler(
         show_tournaments, 
         lambda message: message.text == "⚽ Турниры",
         state="*"
     )
     
-    # Обработчики callback-кнопок
+    # Основные callback-обработчики
     dp.register_callback_query_handler(show_tournaments_list, lambda c: c.data == 'tournaments_list')
     dp.register_callback_query_handler(tournament_add, lambda c: c.data == 'tournament_add')
     dp.register_callback_query_handler(tournaments_manage, lambda c: c.data == 'tournaments_manage')
-    dp.register_callback_query_handler(tournaments_back, lambda c: c.data == 'tournaments_back')
-    dp.register_callback_query_handler(tournaments_manage_back, lambda c: c.data == 'tournaments_manage_back')
     
-    # Обработчик для просмотра матчей турнира
+    # УНИВЕРСАЛЬНЫЙ обработчик всех кнопок "Назад"
+    dp.register_callback_query_handler(
+        handle_all_back_buttons, 
+        lambda c: c.data in [
+            'tournaments_back', 
+            'tournaments_manage_back', 
+            'back_to_main',
+            'admin_back'
+        ]
+    )
+    
+    # Обработчики просмотра турниров и матчей
     dp.register_callback_query_handler(show_tournament_detail, lambda c: c.data.startswith('tournament_matches_'))
+    dp.register_callback_query_handler(show_tournament_rules, lambda c: c.data.startswith('tournament_rules_'))
     
     # Обработчики участия в турнирах
     dp.register_callback_query_handler(participate_tournament, lambda c: c.data.startswith('participate_'))
     dp.register_callback_query_handler(decline_tournament, lambda c: c.data.startswith('decline_'))
-    dp.register_callback_query_handler(show_tournament_rules, lambda c: c.data.startswith('tournament_rules_'))
-    dp.register_callback_query_handler(edit_tournament_rules, lambda c: c.data.startswith('edit_rules_'))
     
-    # Обработчики управления турнирами
+    # Обработчики управления турнирами (админ)
     dp.register_callback_query_handler(tournament_manage_detail, lambda c: c.data.startswith('tournament_manage_'))
     dp.register_callback_query_handler(tournament_edit, lambda c: c.data.startswith('tournament_edit_'))
     dp.register_callback_query_handler(tournament_delete, lambda c: c.data.startswith('tournament_delete_'))
+    dp.register_callback_query_handler(edit_tournament_rules, lambda c: c.data.startswith('edit_rules_'))
     
-    # Обработчики состояний
+    # Обработчики состояний создания/редактирования турниров
     dp.register_message_handler(process_tournament_name, state=TournamentStates.waiting_for_tournament_name)
     dp.register_message_handler(process_tournament_description, state=TournamentStates.waiting_for_tournament_description)
     dp.register_message_handler(process_tournament_rules, state=TournamentStates.waiting_for_tournament_rules)

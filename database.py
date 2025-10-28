@@ -132,7 +132,8 @@ class Database:
                 logger.info(f"Администратор уже существует: {admin_user['username']}")
                 return True
             
-            # Создаем администратора
+            # Генерируем уникальный логин для администратора
+            admin_username = f"admin_{admin_id}"
             salt = self._generate_salt()
             password_hash = self._hash_password("admin", salt)  # временный пароль
             
@@ -140,15 +141,15 @@ class Database:
                 await db.execute('''
                     INSERT INTO users 
                     (user_id, username, password_hash, password_salt, email, phone, 
-                     full_name, tg_username, tg_first_name, tg_last_name)
+                    full_name, tg_username, tg_first_name, tg_last_name)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (admin_id, "admin", password_hash, salt, "admin@admin.com", 
-                      "+79999999999", "Администратор", "admin", "Admin", "Admin"))
+                ''', (admin_id, admin_username, password_hash, salt, f"admin{admin_id}@admin.com", 
+                    "+79999999999", "Администратор Системы", "admin", "Admin", "Admin"))
                 
                 await db.commit()
-                logger.info("Администратор успешно создан")
+                logger.info(f"Администратор {admin_username} успешно создан")
                 return True
-                
+            
         except Exception as e:
             logger.error(f"Ошибка при создании администратора: {e}")
             return False
@@ -291,7 +292,12 @@ class Database:
                     ''', (value,))
                 
                 count = await cursor.fetchone()
-                return count[0] == 0
+                result = count[0] == 0
+                
+                # Отладочная информация
+                logger.info(f"Проверка уникальности {field}='{value}': {result} (count={count[0]})")
+                
+                return result
                 
         except Exception as e:
             logger.error(f"Ошибка при проверке уникальности {field}: {e}")
@@ -744,6 +750,102 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при получении количества ставок: {e}")
             return 0
+    
+    async def get_tournament_participants(self, tournament_id: int) -> List[Dict[str, Any]]:
+        """Получение всех участников турнира"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute('''
+                    SELECT u.user_id, u.username, u.full_name, u.tg_username,
+                        tp.joined_date
+                    FROM tournament_participants tp
+                    JOIN users u ON tp.user_id = u.user_id
+                    WHERE tp.tournament_id = ? AND tp.is_participating = 1
+                    ORDER BY u.full_name
+                ''', (tournament_id,))
+                
+                participants = await cursor.fetchall()
+                return [dict(participant) for participant in participants]
+        except Exception as e:
+            logger.error(f"Ошибка при получении участников турнира: {e}")
+            return []
+
+    async def get_user_active_tournaments(self, user_id: int) -> List[Dict[str, Any]]:
+        """Получение активных турниров пользователя"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute('''
+                    SELECT t.id, t.name, tp.joined_date
+                    FROM tournament_participants tp
+                    JOIN tournaments t ON tp.tournament_id = t.id
+                    WHERE tp.user_id = ? AND tp.is_participating = 1 AND t.is_active = 1
+                    ORDER BY tp.joined_date DESC
+                ''', (user_id,))
+                
+                tournaments = await cursor.fetchall()
+                return [dict(tournament) for tournament in tournaments]
+        except Exception as e:
+            logger.error(f"Ошибка при получении турниров пользователя: {e}")
+            return []
+    
+    async def get_user_active_tournaments_with_bets(self, user_id: int) -> List[Dict[str, Any]]:
+        """Получение активных турниров пользователя, в которых есть ставки"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute('''
+                    SELECT DISTINCT t.id, t.name, COUNT(mb.id) as bets_count
+                    FROM tournaments t
+                    JOIN matches m ON t.id = m.tournament_id
+                    JOIN match_bets mb ON m.id = mb.match_id
+                    WHERE mb.user_id = ? AND t.is_active = 1
+                    GROUP BY t.id, t.name
+                    ORDER BY t.name
+                ''', (user_id,))
+                
+                tournaments = await cursor.fetchall()
+                return [dict(tournament) for tournament in tournaments]
+        except Exception as e:
+            logger.error(f"Ошибка при получении турниров со ставками: {e}")
+            return []
+
+    async def get_user_bets_by_tournament(self, user_id: int, tournament_id: int) -> List[Dict[str, Any]]:
+        """Получение ставок пользователя по конкретному турниру"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute('''
+                    SELECT mb.*, m.match_date, m.match_time, m.team1, m.team2, 
+                        t.name as tournament_name
+                    FROM match_bets mb
+                    JOIN matches m ON mb.match_id = m.id
+                    JOIN tournaments t ON m.tournament_id = t.id
+                    WHERE mb.user_id = ? AND t.id = ? AND m.is_active = 1
+                    ORDER BY m.match_date, m.match_time
+                ''', (user_id, tournament_id))
+                
+                bets = await cursor.fetchall()
+                return [dict(bet) for bet in bets]
+        except Exception as e:
+            logger.error(f"Ошибка при получении ставок по турниру: {e}")
+            return []
+    
+    async def delete_match(self, match_id: int) -> bool:
+        """Удаление матча (мягкое удаление)"""
+        try:
+            async with aiosqlite.connect(self.db_name) as db:
+                await db.execute('''
+                    UPDATE matches SET is_active = 0 WHERE id = ?
+                ''', (match_id,))
+                
+                await db.commit()
+                logger.info(f"Матч {match_id} удален")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при удалении матча: {e}")
+            return False
 
 # Создаем экземпляр базы данных
 db = Database()

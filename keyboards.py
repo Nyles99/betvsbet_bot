@@ -119,16 +119,26 @@ def get_tournament_matches_keyboard(matches: list, tournament_id: int, is_admin:
     """Инлайн клавиатура со списком матчей турнира"""
     keyboard = InlineKeyboardMarkup(row_width=1)
     
+    # Добавляем кнопки для матчей
     for match in matches:
         # Форматируем дату и время
         match_date = match['match_date']
         match_time = match['match_time']
-        btn_text = f"{match_date} {match_time} {match['team1']} - {match['team2']}"
         
-        btn = InlineKeyboardButton(
-            btn_text, 
-            callback_data=f'match_{match["id"]}'
-        )
+        if is_admin:
+            # Для админа - кнопка управления матчем
+            btn_text = f"⚽ {match_date} {match_time} {match['team1']} - {match['team2']}"
+            btn = InlineKeyboardButton(
+                btn_text, 
+                callback_data=f'admin_match_{match["id"]}'
+            )
+        else:
+            # Для пользователя - обычная кнопка матча
+            btn_text = f"{match_date} {match_time} {match['team1']} - {match['team2']}"
+            btn = InlineKeyboardButton(
+                btn_text, 
+                callback_data=f'match_{match["id"]}'
+            )
         keyboard.add(btn)
     
     # Кнопка правил турнира
@@ -140,7 +150,12 @@ def get_tournament_matches_keyboard(matches: list, tournament_id: int, is_admin:
         add_match_btn = InlineKeyboardButton('➕ Добавить матч', callback_data=f'add_match_{tournament_id}')
         keyboard.add(add_match_btn)
     
-    back_btn = InlineKeyboardButton('🔙 Назад', callback_data='tournaments_back')
+    # Кнопка Назад
+    if is_admin:
+        back_btn = InlineKeyboardButton('🔙 Назад', callback_data='tournaments_manage_back')
+    else:
+        back_btn = InlineKeyboardButton('🔙 Назад', callback_data='tournaments_back')
+    
     keyboard.add(back_btn)
     
     return keyboard
@@ -187,6 +202,33 @@ def get_tournament_manage_keyboard(tournament_id: int):
     keyboard.add(matches_btn)
     keyboard.add(back_btn)
     
+    return keyboard
+
+def get_tournaments_for_bets_keyboard(tournaments: list):
+    """Клавиатура для выбора турнира при просмотре ставок"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    
+    for tournament in tournaments:
+        btn_text = f"🏆 {tournament['name']} ({tournament['bets_count']} ставок)"
+        if len(btn_text) > 50:  # Ограничение длины текста кнопки
+            btn_text = f"🏆 {tournament['name'][:30]}... ({tournament['bets_count']})"
+        
+        btn = InlineKeyboardButton(
+            btn_text, 
+            callback_data=f'bets_tournament_{tournament["id"]}'
+        )
+        keyboard.add(btn)
+    
+    back_btn = InlineKeyboardButton('🔙 Назад', callback_data='user_tournaments_back')
+    keyboard.add(back_btn)
+    
+    return keyboard
+
+def get_bets_back_to_tournaments_keyboard():
+    """Клавиатура для возврата к выбору турнира"""
+    keyboard = InlineKeyboardMarkup()
+    back_btn = InlineKeyboardButton('🔙 К выбору турнира', callback_data='my_bets')
+    keyboard.add(back_btn)
     return keyboard
 
 def get_tournaments_manage_list_keyboard(tournaments: list):
@@ -336,15 +378,97 @@ def get_score_keyboard(match_id: int):
     
     return keyboard
 
-def get_user_tournaments_keyboard():
+def get_user_tournaments_keyboard(participants_count: int = 0):
     """Клавиатура для раздела 'Идущие турниры' в личном кабинете"""
     keyboard = InlineKeyboardMarkup()
     
-    my_bets_btn = InlineKeyboardButton('📊 Мои ставки', callback_data='my_bets')
+    my_bets_btn = InlineKeyboardButton('📊 Мои ставки', callback_data='my_bets')  # Должно быть 'my_bets'
+    all_players_btn = InlineKeyboardButton(f'👥 Все игроки ({participants_count} чел.)', callback_data='all_players')
     back_btn = InlineKeyboardButton('🔙 Назад', callback_data='back_to_profile')
     
     keyboard.add(my_bets_btn)
+    keyboard.add(all_players_btn)
     keyboard.add(back_btn)
+    
+    return keyboard
+
+def get_tournament_players_keyboard(tournament_id: int, page: int = 0, total_pages: int = 1):
+    """Клавиатура для списка игроков турнира с пагинацией"""
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    
+    keyboard = InlineKeyboardMarkup(row_width=3)
+    
+    # Кнопки навигации
+    nav_buttons = []
+    if page > 0:
+        prev_btn = InlineKeyboardButton('◀️ Назад', callback_data=f'players_page_{tournament_id}_{page-1}')
+        nav_buttons.append(prev_btn)
+    
+    page_info = InlineKeyboardButton(f'{page+1}/{total_pages}', callback_data='current_page')
+    nav_buttons.append(page_info)
+    
+    if page < total_pages - 1:
+        next_btn = InlineKeyboardButton('Вперед ▶️', callback_data=f'players_page_{tournament_id}_{page+1}')
+        nav_buttons.append(next_btn)
+    
+    if nav_buttons:
+        keyboard.row(*nav_buttons)
+    
+    back_btn = InlineKeyboardButton('🔙 Назад к турнирам', callback_data='user_tournaments_back')
+    keyboard.add(back_btn)
+    
+    return keyboard
+
+def get_player_info_keyboard(tournament_id: int, user_id: int, current_page: int = 0):
+    """Клавиатура для информации о игроке"""
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    
+    keyboard = InlineKeyboardMarkup()
+    
+    back_to_players_btn = InlineKeyboardButton(
+        '🔙 Назад к списку', 
+        callback_data=f'players_page_{tournament_id}_{current_page}'
+    )
+    tournaments_back_btn = InlineKeyboardButton('🔙 В личный кабинет', callback_data='user_tournaments_back')
+    
+    keyboard.add(back_to_players_btn)
+    keyboard.add(tournaments_back_btn)
+    
+    return keyboard
+
+def get_player_list_keyboard(players: list, tournament_id: int, page: int, total_pages: int):
+    """Клавиатура со списком игроков для текущей страницы"""
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    
+    # Добавляем кнопки для каждого игрока на текущей странице
+    for player in players:
+        btn_text = f"👤 {player['full_name']} (@{player['username']})"
+        if len(btn_text) > 50:  # Ограничение длины текста кнопки
+            btn_text = f"👤 {player['full_name'][:30]}... (@{player['username']})"
+        
+        btn = InlineKeyboardButton(
+            btn_text, 
+            callback_data=f'player_info_{tournament_id}_{player["user_id"]}_{page}'
+        )
+        keyboard.add(btn)
+    
+    # Добавляем пагинацию
+    pagination_keyboard = get_tournament_players_keyboard(tournament_id, page, total_pages)
+    if pagination_keyboard.inline_keyboard:
+        keyboard.row(*pagination_keyboard.inline_keyboard[0])  # Добавляем кнопки пагинации
+        if len(pagination_keyboard.inline_keyboard) > 1:
+            for row in pagination_keyboard.inline_keyboard[1:]:
+                keyboard.add(*row)  # Добавляем остальные кнопки
+    
+    return keyboard
+    
+    # Добавляем пагинацию
+    pagination_keyboard = get_tournament_players_keyboard(tournament_id, page, total_pages)
+    keyboard.row(*pagination_keyboard.inline_keyboard[0])  # Добавляем кнопки пагинации
+    if len(pagination_keyboard.inline_keyboard) > 1:
+        keyboard.add(*pagination_keyboard.inline_keyboard[1])  # Добавляем кнопку назад
     
     return keyboard
 
@@ -465,6 +589,52 @@ def get_admin_bets_keyboard(match_id: int):
     back_btn = InlineKeyboardButton('🔙 Назад', callback_data=f'admin_matches')
     
     keyboard.add(view_all_btn, clear_bets_btn)
+    keyboard.add(back_btn)
+    
+    return keyboard
+
+def get_tournament_matches_keyboard(matches: list, tournament_id: int, is_admin: bool = False):
+    """Инлайн клавиатура со списком матчей турнира"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    
+    # Добавляем кнопки для матчей
+    for match in matches:
+        # Форматируем дату и время
+        match_date = match['match_date']
+        match_time = match['match_time']
+        
+        if is_admin:
+            # Для админа - кнопка управления матчем
+            btn_text = f"⚽ {match_date} {match_time} {match['team1']} - {match['team2']}"
+            btn = InlineKeyboardButton(
+                btn_text, 
+                callback_data=f'admin_match_{match["id"]}'
+            )
+        else:
+            # Для пользователя - обычная кнопка матча
+            btn_text = f"{match_date} {match_time} {match['team1']} - {match['team2']}"
+            btn = InlineKeyboardButton(
+                btn_text, 
+                callback_data=f'match_{match["id"]}'
+            )
+        keyboard.add(btn)
+    
+    # Кнопка правил турнира
+    rules_btn = InlineKeyboardButton('📋 Правила турнира', callback_data=f'tournament_rules_{tournament_id}')
+    keyboard.add(rules_btn)
+    
+    # Кнопка добавления матча только для администратора
+    if is_admin:
+        add_match_btn = InlineKeyboardButton('➕ Добавить матч', callback_data=f'add_match_{tournament_id}')
+        keyboard.add(add_match_btn)
+    
+    # ВАЖНОЕ ИСПРАВЛЕНИЕ: Всегда используем tournaments_back для обычных пользователей
+    # и tournaments_manage_back только для админов
+    if is_admin:
+        back_btn = InlineKeyboardButton('🔙 Назад', callback_data='tournaments_manage_back')
+    else:
+        back_btn = InlineKeyboardButton('🔙 Назад', callback_data='tournaments_back')
+    
     keyboard.add(back_btn)
     
     return keyboard

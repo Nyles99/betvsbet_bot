@@ -114,13 +114,22 @@ async def show_user_tournaments_section(callback: types.CallbackQuery):
         await callback.answer("❌ Ошибка: пользователь не найден")
         return
     
+    # Получаем общее количество участников во всех активных турнирах
+    tournaments = await db.get_all_tournaments()
+    total_participants = 0
+    for tournament in tournaments:
+        participants = await db.get_tournament_participants(tournament['id'])
+        total_participants += len(participants)
+    
     section_text = (
         "📊 *Идущие турниры*\n\n"
         f"👋 Привет, {user_data['full_name']}!\n\n"
-        f"🎯 У вас сделано ставок: **{bets_count}**\n\n"
+        f"🎯 У вас сделано ставок: **{bets_count}**\n"
+        f"👥 Всего игроков в турнирах: **{total_participants}**\n\n"
         "В этом разделе вы можете:\n"
         "• Просмотреть все ваши ставки\n"
         "• Увидеть прогнозы на матчи\n"
+        "• Посмотреть список всех игроков\n"
         "• Следить за активными турнирами\n\n"
         "Выберите действие:"
     )
@@ -128,7 +137,7 @@ async def show_user_tournaments_section(callback: types.CallbackQuery):
     await callback.message.edit_text(
         section_text,
         parse_mode="Markdown",
-        reply_markup=get_user_tournaments_keyboard()
+        reply_markup=get_user_tournaments_keyboard(total_participants)
     )
 
 async def show_my_bets(callback: types.CallbackQuery):

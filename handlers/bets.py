@@ -15,7 +15,9 @@ from keyboards import (
     get_bet_actions_keyboard,
     get_bet_stats_keyboard,
     get_back_to_tournament_keyboard,
-    get_profile_keyboard
+    get_profile_keyboard,
+    get_tournaments_for_bets_keyboard,
+    get_bets_back_to_tournaments_keyboard
 )
 from config_bot import config
 
@@ -120,32 +122,19 @@ async def confirm_bet(callback: types.CallbackQuery):
             parse_mode="Markdown"
         )
         
-        # Получаем все матчи турнира
-        tournament_matches = await db.get_matches_by_tournament(match['tournament_id'])
+        # ВОЗВРАЩАЕМСЯ В МЕНЮ ТУРНИРА ВМЕСТО ПОКАЗА СЛЕДУЮЩЕГО МАТЧА
+        from handlers.tournaments import show_tournament_matches
         
-        # Находим матчи, на которые пользователь еще не сделал ставки
-        matches_without_bets = []
-        for tournament_match in tournament_matches:
-            user_bet = await db.get_match_bet(user_id, tournament_match['id'])
-            if not user_bet and tournament_match['id'] != match_id:  # Исключаем текущий матч
-                matches_without_bets.append(tournament_match)
+        # Создаем mock callback для возврата к турниру
+        class MockCallback:
+            def __init__(self, message, tournament_id):
+                self.message = message
+                self.data = f'tournament_matches_{tournament_id}'
+                self.from_user = message.from_user
         
-        if matches_without_bets:
-            # Есть матчи без ставок - показываем следующий матч
-            next_match = matches_without_bets[0]
-            await show_match_after_bet(callback, next_match['id'])
-        else:
-            # Все ставки сделаны - показываем сообщение
-            await callback.message.answer(
-                f"🎉 *Поздравляем!*\n\n"
-                f"Вы сделали прогнозы на все матчи турнира:\n"
-                f"**{tournament['name']}**\n\n"
-                f"📊 Всего матчей: {len(tournament_matches)}\n"
-                f"✅ Ваших прогнозов: {len(tournament_matches)}\n\n"
-                "Следите за результатами в личном кабинете!",
-                parse_mode="Markdown",
-                reply_markup=get_back_to_tournament_keyboard(match['tournament_id'])
-            )
+        mock_callback = MockCallback(callback.message, match['tournament_id'])
+        await show_tournament_matches(mock_callback)
+        
     else:
         await callback.message.edit_text(
             "❌ Ошибка при сохранении ставки!\n"
@@ -234,16 +223,20 @@ async def show_user_tournaments(callback: types.CallbackQuery):
         "Здесь вы можете просмотреть матчи, на которые сделали ставки, "
         "и управлять своими прогнозами.",
         parse_mode="Markdown",
-        reply_markup=get_user_tournaments_keyboard()
+        reply_mup=get_user_tournaments_keyboard()
     )
     await callback.answer()
 
 async def show_my_bets(callback: types.CallbackQuery):
-    """Показать все ставки пользователя"""
+    """Показать выбор турниров для просмотра ставок"""
+    print("DEBUG: show_my_bets вызвана")
     user_id = callback.from_user.id
-    user_bets = await db.get_user_bets(user_id)
     
-    if not user_bets:
+    # Получаем турниры, в которых у пользователя есть ставки
+    tournaments_with_bets = await db.get_user_active_tournaments_with_bets(user_id)
+    print(f"DEBUG: Найдено турниров со ставками: {len(tournaments_with_bets)}")
+    
+    if not tournaments_with_bets:
         await callback.message.edit_text(
             "📭 *У вас пока нет ставок*\n\n"
             "Чтобы сделать ставку:\n"
@@ -256,37 +249,126 @@ async def show_my_bets(callback: types.CallbackQuery):
             reply_markup=get_bets_back_keyboard()
         )
     else:
-        # Группируем ставки по турнирам
-        tournaments_bets = {}
-        for bet in user_bets:
-            tournament_name = bet['tournament_name']
-            if tournament_name not in tournaments_bets:
-                tournaments_bets[tournament_name] = []
-            tournaments_bets[tournament_name].append(bet)
+        total_bets = sum(t['bets_count'] for t in tournaments_with_bets)
         
-        bets_text = "📊 *Ваши ставки по турнирам:*\n\n"
+        selection_text = (
+            "🎯 *Ваши ставки по турнирам*\n\n"
+            f"📊 Всего ставок: **{total_bets}**\n"
+            f"🏆 Турниров со ставками: **{len(tournaments_with_bets)}**\n\n"
+            "Выберите турнир для просмотра ставок:"
+        )
         
-        for tournament_name, bets in tournaments_bets.items():
-            bets_text += f"🏆 *{tournament_name}* ({len(bets)} ставок):\n"
-            
-            for i, bet in enumerate(bets, 1):
-                bets_text += (
-                    f"  {i}. {bet['team1']} vs {bet['team2']}\n"
-                    f"      🎯 {bet['team1_score']}-{bet['team2_score']}\n"
-                    f"      📅 {bet['match_date']} {bet['match_time']}\n"
-                )
-            
-            bets_text += "\n"
-        
-        bets_text += f"📈 Всего ставок: **{len(user_bets)}**"
+        keyboard = get_tournaments_for_bets_keyboard(tournaments_with_bets)
         
         await callback.message.edit_text(
-            bets_text,
+            selection_text,
             parse_mode="Markdown",
-            reply_markup=get_bets_back_keyboard()
+            reply_markup=keyboard
         )
     
     await callback.answer()
+
+async def show_bets_by_tournament(callback: types.CallbackQuery):
+    """Показать ставки пользователя по выбранному турниру в виде таблицы"""
+    print("DEBUG: show_bets_by_tournament вызвана")
+    tournament_id = int(callback.data.split('_')[2])
+    print(f"DEBUG: tournament_id = {tournament_id}")
+    
+    user_id = callback.from_user.id
+    tournament_bets = await db.get_user_bets_by_tournament(user_id, tournament_id)
+    tournament = await db.get_tournament_by_id(tournament_id)
+    
+    print(f"DEBUG: Найдено ставок в турнире: {len(tournament_bets)}")
+    
+    if not tournament_bets:
+        await callback.message.edit_text(
+            f"📭 *Ставки в турнире: {tournament['name']}*\n\n"
+            "У вас пока нет ставок в этом турнире.\n\n"
+            "Чтобы сделать ставку, перейдите в раздел турниров и выберите матч.",
+            parse_mode="Markdown",
+            reply_markup=get_bets_back_to_tournaments_keyboard()
+        )
+        await callback.answer()
+        return
+    
+    # Форматируем ставки в виде таблицы
+    bets_text = format_bets_table(tournament_bets, tournament['name'])
+    
+    await callback.message.edit_text(
+        bets_text,
+        parse_mode="HTML",
+        reply_markup=get_bets_back_to_tournaments_keyboard()
+    )
+    await callback.answer()
+
+def format_bets_table_simple(bets: list, tournament_name: str) -> str:
+    """Простое форматирование ставок в виде таблицы"""
+    table_text = (
+        f"<b>🎯 Ваши ставки в турнире: {tournament_name}</b>\n\n"
+        "<b>Дата        Матч                          Счет</b>\n"
+        "─────────────────────────────────────────────\n"
+    )
+    
+    for bet in bets:
+        # Форматируем дату
+        match_date = bet['match_date']
+        if len(match_date) > 5:
+            match_date = match_date[:5]  # Берем только ДД.ММ
+        
+        # Форматируем матч
+        match_text = f"{bet['team1']} - {bet['team2']}"
+        if len(match_text) > 25:
+            match_text = match_text[:22] + "..."
+        
+        # Форматируем счет
+        score = f"{bet['team1_score']}-{bet['team2_score']}"
+        
+        # Добавляем строку
+        table_text += f"{match_date:<10} {match_text:<25} {score:>6}\n"
+    
+    table_text += f"\n<b>📊 Всего ставок:</b> {len(bets)}"
+    
+    return table_text
+
+def format_bets_table(bets: list, tournament_name: str) -> str:
+    """Форматирование ставок в виде таблицы с выравниванием"""
+    
+    # Создаем шапку таблицы
+    table_header = (
+        f"<b>🎯 Ваши ставки в турнире: {tournament_name}</b>\n\n"
+        "<b>┌────────────┬──────────────────────────────┬────────┐</b>\n"
+        "<b>│   Дата     │            Матч             │  Счет  │</b>\n"
+        "<b>├────────────┼──────────────────────────────┼────────┤</b>\n"
+    )
+    
+    table_rows = ""
+    
+    for i, bet in enumerate(bets, 1):
+        # Форматируем дату (ДД.ММ)
+        match_date = bet['match_date']
+        if len(match_date) > 5:
+            match_date = match_date[:5]  # Берем только ДД.ММ
+        
+        # Форматируем матч (команда1 vs команда2)
+        match_text = f"{bet['team1']} vs {bet['team2']}"
+        if len(match_text) > 24:
+            match_text = match_text[:21] + "..."
+        
+        # Форматируем счет
+        score = f"{bet['team1_score']}-{bet['team2_score']}"
+        
+        # Создаем строку таблицы
+        table_rows += (
+            f"<b>│</b> {match_date:<10} <b>│</b> {match_text:<26} <b>│</b> {score:>6} <b>│</b>\n"
+        )
+    
+    # Подвал таблицы
+    table_footer = (
+        "<b>└────────────┴──────────────────────────────┴────────┘</b>\n\n"
+        f"<b>📊 Всего ставок:</b> {len(bets)}"
+    )
+    
+    return table_header + table_rows + table_footer
 
 async def view_bet_details(callback: types.CallbackQuery):
     """Просмотр деталей конкретной ставки"""
@@ -568,6 +650,233 @@ async def admin_clear_bets(callback: types.CallbackQuery):
     )
     await callback.answer()
 
+# Новые функции для списка игроков
+async def show_all_players(callback: types.CallbackQuery):
+    """Показать список всех игроков в турнирах"""
+    user_id = callback.from_user.id
+    
+    # Получаем все активные турниры
+    tournaments = await db.get_all_tournaments()
+    if not tournaments:
+        await callback.message.edit_text(
+            "📭 *Список игроков*\n\n"
+            "На данный момент нет активных турниров с участниками.",
+            parse_mode="Markdown",
+            reply_markup=get_bets_back_keyboard()
+        )
+        await callback.answer()
+        return
+    
+    # Собираем всех участников из всех турниров
+    all_players = []
+    seen_players = set()
+    
+    for tournament in tournaments:
+        participants = await db.get_tournament_participants(tournament['id'])
+        for player in participants:
+            if player['user_id'] not in seen_players:
+                # Добавляем информацию о турнире к игроку
+                player_with_tournament = player.copy()
+                player_with_tournament['source_tournament_id'] = tournament['id']
+                all_players.append(player_with_tournament)
+                seen_players.add(player['user_id'])
+    
+    if not all_players:
+        await callback.message.edit_text(
+            "📭 *Список игроков*\n\n"
+            "Пока нет участников в турнирах.",
+            parse_mode="Markdown",
+            reply_markup=get_bets_back_keyboard()
+        )
+        await callback.answer()
+        return
+    
+    # Сортируем игроков по имени
+    all_players.sort(key=lambda x: x['full_name'])
+    
+    # Используем tournament_id = 0 для обозначения "все турниры"
+    await show_players_page(callback, all_players, 0, tournament_id=0)
+    await callback.answer()
+
+async def show_players_page(callback: types.CallbackQuery, players: list, page: int, tournament_id: int = 0):
+    """Показать страницу со списком игроков"""
+    ITEMS_PER_PAGE = 10
+    total_pages = (len(players) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+    
+    start_idx = page * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+    current_players = players[start_idx:end_idx]
+    
+    if tournament_id == 0:
+        page_text = (
+            f"👥 *Все игроки турниров*\n\n"
+            f"📊 Всего игроков: **{len(players)}**\n"
+            f"📄 Страница **{page + 1}** из **{total_pages}**\n\n"
+            "Выберите игрока для просмотра информации:"
+        )
+    else:
+        tournament = await db.get_tournament_by_id(tournament_id)
+        tournament_name = tournament['name'] if tournament else "Неизвестный турнир"
+        page_text = (
+            f"👥 *Игроки турнира: {tournament_name}*\n\n"
+            f"📊 Всего игроков: **{len(players)}**\n"
+            f"📄 Страница **{page + 1}** из **{total_pages}**\n\n"
+            "Выберите игрока для просмотра информации:"
+        )
+    
+    keyboard = get_player_list_keyboard(current_players, tournament_id, page, total_pages)
+    
+    await callback.message.edit_text(
+        page_text,
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
+async def handle_players_pagination(callback: types.CallbackQuery):
+    """Обработка пагинации списка игроков"""
+    # callback_data format: players_page_tournamentId_pageNumber
+    parts = callback.data.split('_')
+    tournament_id = int(parts[2])
+    page = int(parts[3])
+    
+    if tournament_id == 0:
+        # Получаем всех участников из всех турниров
+        tournaments = await db.get_all_tournaments()
+        all_players = []
+        seen_players = set()
+        
+        for tournament in tournaments:
+            participants = await db.get_tournament_participants(tournament['id'])
+            for player in participants:
+                if player['user_id'] not in seen_players:
+                    player_with_tournament = player.copy()
+                    player_with_tournament['source_tournament_id'] = tournament['id']
+                    all_players.append(player_with_tournament)
+                    seen_players.add(player['user_id'])
+        
+        all_players.sort(key=lambda x: x['full_name'])
+        await show_players_page(callback, all_players, page, tournament_id)
+    else:
+        # Получаем участников конкретного турнира
+        participants = await db.get_tournament_participants(tournament_id)
+        if not participants:
+            await callback.answer("❌ Нет участников в турнире!")
+            return
+        
+        await show_players_page(callback, participants, page, tournament_id)
+    
+    await callback.answer()
+
+async def show_player_info(callback: types.CallbackQuery):
+    """Показать информацию о выбранном игроке"""
+    # callback_data format: player_info_tournamentId_userId_page
+    parts = callback.data.split('_')
+    tournament_id = int(parts[2])
+    target_user_id = int(parts[3])
+    current_page = int(parts[4])
+    
+    # Получаем информацию о игроке
+    player_data = await db.get_user_by_id(target_user_id)
+    if not player_data:
+        await callback.answer("❌ Игрок не найден!")
+        return
+    
+    # Получаем активные турниры игрока
+    active_tournaments = await db.get_user_active_tournaments(target_user_id)
+    
+    # Используем HTML разметку
+    player_info = (
+        "👤 <b>Информация об игроке</b>\n\n"
+        f"🔑 <b>Логин:</b> <code>{player_data['username']}</code>\n"
+        f"👨‍💼 <b>Имя:</b> {player_data['full_name']}\n"
+    )
+    
+    if player_data.get('tg_username'):
+        player_info += f"🤖 <b>Telegram:</b> @{player_data['tg_username']}\n"
+    
+    player_info += f"\n🏆 <b>Участвует в турнирах</b> ({len(active_tournaments)}):\n"
+    
+    if active_tournaments:
+        for i, tournament in enumerate(active_tournaments, 1):
+            player_info += f"{i}. {tournament['name']}\n"
+    else:
+        player_info += "Пока не участвует в турнирах\n"
+    
+    keyboard = get_player_info_keyboard(tournament_id, target_user_id, current_page)
+    
+    await callback.message.edit_text(
+        player_info,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+def get_player_list_keyboard(players: list, tournament_id: int, page: int, total_pages: int):
+    """Клавиатура со списком игроков для текущей страницы"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    
+    # Добавляем кнопки для каждого игрока на текущей странице
+    for player in players:
+        btn_text = f"👤 {player['full_name']} (@{player['username']})"
+        if len(btn_text) > 50:  # Ограничение длины текста кнопки
+            btn_text = f"👤 {player['full_name'][:30]}... (@{player['username']})"
+        
+        btn = InlineKeyboardButton(
+            btn_text, 
+            callback_data=f'player_info_{tournament_id}_{player["user_id"]}_{page}'
+        )
+        keyboard.add(btn)
+    
+    # Добавляем пагинацию
+    pagination_keyboard = get_tournament_players_keyboard(tournament_id, page, total_pages)
+    if pagination_keyboard.inline_keyboard:
+        keyboard.row(*pagination_keyboard.inline_keyboard[0])  # Добавляем кнопки пагинации
+        if len(pagination_keyboard.inline_keyboard) > 1:
+            for row in pagination_keyboard.inline_keyboard[1:]:
+                keyboard.add(*row)  # Добавляем остальные кнопки
+    
+    return keyboard
+
+def get_tournament_players_keyboard(tournament_id: int, page: int = 0, total_pages: int = 1):
+    """Клавиатура для списка игроков турнира с пагинация"""
+    keyboard = InlineKeyboardMarkup(row_width=3)
+    
+    # Кнопки навигации
+    nav_buttons = []
+    if page > 0:
+        prev_btn = InlineKeyboardButton('◀️ Назад', callback_data=f'players_page_{tournament_id}_{page-1}')
+        nav_buttons.append(prev_btn)
+    
+    page_info = InlineKeyboardButton(f'{page+1}/{total_pages}', callback_data='current_page')
+    nav_buttons.append(page_info)
+    
+    if page < total_pages - 1:
+        next_btn = InlineKeyboardButton('Вперед ▶️', callback_data=f'players_page_{tournament_id}_{page+1}')
+        nav_buttons.append(next_btn)
+    
+    if nav_buttons:
+        keyboard.row(*nav_buttons)
+    
+    back_btn = InlineKeyboardButton('🔙 Назад к турнирам', callback_data='user_tournaments_back')
+    keyboard.add(back_btn)
+    
+    return keyboard
+
+def get_player_info_keyboard(tournament_id: int, user_id: int, current_page: int = 0):
+    """Клавиатура для информации о игроке"""
+    keyboard = InlineKeyboardMarkup()
+    
+    back_to_players_btn = InlineKeyboardButton(
+        '🔙 Назад к списку', 
+        callback_data=f'players_page_{tournament_id}_{current_page}'
+    )
+    tournaments_back_btn = InlineKeyboardButton('🔙 В личный кабинет', callback_data='user_tournaments_back')
+    
+    keyboard.add(back_to_players_btn)
+    keyboard.add(tournaments_back_btn)
+    
+    return keyboard
+
 def register_handlers_bets(dp: Dispatcher):
     """Регистрация обработчиков ставок"""
     
@@ -582,6 +891,7 @@ def register_handlers_bets(dp: Dispatcher):
     # Обработчики личного кабинета и ставок
     dp.register_callback_query_handler(show_user_tournaments, lambda c: c.data == 'user_tournaments')
     dp.register_callback_query_handler(show_my_bets, lambda c: c.data == 'my_bets')
+    dp.register_callback_query_handler(show_bets_by_tournament, lambda c: c.data.startswith('bets_tournament_'))
     dp.register_callback_query_handler(view_bet_details, lambda c: c.data.startswith('view_bet_'))
     dp.register_callback_query_handler(edit_bet, lambda c: c.data.startswith('edit_bet_'))
     dp.register_callback_query_handler(delete_bet, lambda c: c.data.startswith('delete_bet_'))
@@ -591,6 +901,11 @@ def register_handlers_bets(dp: Dispatcher):
     dp.register_callback_query_handler(user_tournaments_back, lambda c: c.data == 'user_tournaments_back')
     dp.register_callback_query_handler(profile_back, lambda c: c.data == 'profile_back')
     dp.register_callback_query_handler(back_to_tournament, lambda c: c.data.startswith('tournament_back_'))
+    
+    # Обработчики списка игроков
+    dp.register_callback_query_handler(show_all_players, lambda c: c.data == 'all_players')
+    dp.register_callback_query_handler(show_player_info, lambda c: c.data.startswith('player_info_'))
+    dp.register_callback_query_handler(handle_players_pagination, lambda c: c.data.startswith('players_page_'))
     
     # Админ обработчики
     dp.register_callback_query_handler(admin_view_bets, lambda c: c.data.startswith('admin_view_bets_'))
