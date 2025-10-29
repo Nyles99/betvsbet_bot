@@ -24,6 +24,7 @@ def get_main_inline_keyboard():
     return InlineKeyboardMarkup(row_width=2).add(
         InlineKeyboardButton("👤 Личный кабинет", callback_data="profile"),
         InlineKeyboardButton("🏆 Турниры", callback_data="tournaments"),
+        InlineKeyboardButton("⚽ Сделать ставку", callback_data="make_bet"),
         InlineKeyboardButton("ℹ️ Помощь", callback_data="help"),
         InlineKeyboardButton("📞 О нас", callback_data="about")
     )
@@ -34,6 +35,7 @@ def get_profile_inline_keyboard():
         InlineKeyboardButton("✏️ Изменить логин", callback_data="change_username"),
         InlineKeyboardButton("✏️ Изменить ФИО", callback_data="change_fullname"),
         InlineKeyboardButton("📊 Мой профиль", callback_data="my_profile"),
+        InlineKeyboardButton("📋 Мои ставки", callback_data="my_bets"),
         InlineKeyboardButton("🔙 Назад", callback_data="main_menu")
     )
 
@@ -73,6 +75,61 @@ def get_user_tournament_matches_keyboard(tournament_id, matches):
     
     # Кнопка назад
     keyboard.add(InlineKeyboardButton("🔙 Назад к турнирам", callback_data="tournaments"))
+    
+    return keyboard
+
+def get_available_matches_keyboard(matches):
+    """Клавиатура доступных матчей для ставок"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    
+    # Добавляем кнопки для каждого матча
+    for match in matches:
+        match_text = f"📅 {match[2]} {match[3]} - {match[4]} vs {match[5]}"
+        # Обрезаем текст если слишком длинный
+        if len(match_text) > 60:
+            match_text = match_text[:57] + "..."
+        keyboard.add(InlineKeyboardButton(
+            match_text, 
+            callback_data=f"user_match_{match[0]}"  # Изменяем на user_match_ для единообразия
+        ))
+    
+    # Кнопка назад
+    keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="main_menu"))
+    
+    return keyboard
+
+def get_bet_score_keyboard(match_id):
+    """Клавиатура для ввода счета"""
+    return InlineKeyboardMarkup(row_width=2).add(
+        InlineKeyboardButton("✅ Отправить счет", callback_data=f"submit_score_{match_id}"),
+        InlineKeyboardButton("🔙 Назад", callback_data="make_bet")
+    )
+
+def get_user_bets_tournaments_keyboard(tournaments):
+    """Клавиатура турниров со ставками пользователя"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    
+    # Добавляем кнопки для каждого турнира
+    for tournament in tournaments:
+        keyboard.add(InlineKeyboardButton(
+            f"🏆 {tournament[1]}", 
+            callback_data=f"bets_tournament_{tournament[0]}"
+        ))
+    
+    # Кнопка назад
+    keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="profile"))
+    
+    return keyboard
+
+def get_user_tournament_bets_keyboard(tournament_id, bets):
+    """Клавиатура ставок пользователя в турнире"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    
+    # Добавляем информацию о каждой ставке (только текст, без callback)
+    # так как это просто отображение информации
+    
+    # Кнопка назад
+    keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="my_bets"))
     
     return keyboard
 
@@ -185,6 +242,31 @@ def get_back_inline_keyboard():
         InlineKeyboardButton("🔙 Назад", callback_data="main_menu")
     )
 
+def get_back_to_profile_keyboard():
+    """Клавиатура с кнопкой Назад в профиль"""
+    return InlineKeyboardMarkup().add(
+        InlineKeyboardButton("🔙 Назад", callback_data="profile")
+    )
+
+def get_back_to_bets_keyboard():
+    """Клавиатура с кнопкой Назад к ставкам"""
+    return InlineKeyboardMarkup().add(
+        InlineKeyboardButton("🔙 Назад", callback_data="my_bets")
+    )
+
+def get_back_to_make_bet_keyboard():
+    """Клавиатура с кнопкой Назад к созданию ставки"""
+    return InlineKeyboardMarkup().add(
+        InlineKeyboardButton("🔙 Назад", callback_data="make_bet")
+    )
+
 def remove_keyboard():
     """Убрать клавиатуру"""
     return ReplyKeyboardRemove()
+
+def get_match_bet_keyboard(match_id):
+    """Клавиатура для ввода счета в деталях матча"""
+    return InlineKeyboardMarkup(row_width=2).add(
+        InlineKeyboardButton("✅ Отправить счет", callback_data=f"submit_match_score_{match_id}"),
+        InlineKeyboardButton("🔙 Назад к матчам", callback_data="make_bet")
+    )

@@ -52,9 +52,21 @@ class DatabaseHandler:
                     FOREIGN KEY (tournament_id) REFERENCES tournaments (id)
                 )
             ''')
+            
+            # Таблица ставок пользователей
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_bets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    match_id INTEGER NOT NULL,
+                    score TEXT NOT NULL,
+                    bet_date TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id),
+                    FOREIGN KEY (match_id) REFERENCES matches (id),
+                    UNIQUE(user_id, match_id)
+                )
+            ''')
             conn.commit()
-    
-    # ... существующие методы для пользователей и турниров ...
     
     def add_user(self, user_id: int, phone_number: str) -> bool:
         """Добавление нового пользователя"""
@@ -292,3 +304,110 @@ class DatabaseHandler:
         except Exception as e:
             logging.error(f"Error updating match: {e}")
             return False
+
+    # Методы для ставок
+    def add_user_bet(self, user_id: int, match_id: int, score: str) -> bool:
+        """Добавление ставки пользователя"""
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO user_bets (user_id, match_id, score, bet_date)
+                    VALUES (?, ?, ?, datetime('now'))
+                ''', (user_id, match_id, score))
+                conn.commit()
+                return True
+        except sqlite3.IntegrityError:
+            # Обновляем ставку если она уже существует
+            return self.update_user_bet(user_id, match_id, score)
+        except Exception as e:
+            logging.error(f"Error adding user bet: {e}")
+            return False
+    
+    def update_user_bet(self, user_id: int, match_id: int, score: str) -> bool:
+        """Обновление ставки пользователя"""
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE user_bets SET score = ?, bet_date = datetime('now')
+                    WHERE user_id = ? AND match_id = ?
+                ''', (score, user_id, match_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logging.error(f"Error updating user bet: {e}")
+            return False
+    
+    def get_user_bet(self, user_id: int, match_id: int):
+        """Получение ставки пользователя на матч"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM user_bets WHERE user_id = ? AND match_id = ?
+            ''', (user_id, match_id))
+            return cursor.fetchone()
+    
+    def get_user_bets(self, user_id: int):
+        """Получение всех ставок пользователя"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT ub.*, m.match_date, m.match_time, m.team1, m.team2, t.name as tournament_name
+                FROM user_bets ub
+                JOIN matches m ON ub.match_id = m.id
+                JOIN tournaments t ON m.tournament_id = t.id
+                WHERE ub.user_id = ?
+                ORDER BY m.match_date, m.match_time
+            ''', (user_id,))
+            return cursor.fetchall()
+    
+    def get_available_matches_for_user(self, user_id: int):
+        """Получение матчей, на которые пользователь еще не делал ставку"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT m.*, t.name as tournament_name
+                FROM matches m
+                JOIN tournaments t ON m.tournament_id = t.id
+                WHERE m.status = 'scheduled' 
+                AND m.id NOT IN (
+                    SELECT match_id FROM user_bets WHERE user_id = ?
+                )
+                ORDER BY m.match_date, m.match_time
+            ''', (user_id,))
+            return cursor.fetchall()
+    
+    def get_user_tournaments_with_bets(self, user_id: int):
+        """Получение турниров, в которых пользователь делал ставки"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT DISTINCT t.*
+                FROM tournaments t
+                JOIN matches m ON t.id = m.tournament_id
+                JOIN user_bets ub ON m.id = ub.match_id
+                WHERE ub.user_id = ?
+                ORDER BY t.name
+            ''', (user_id,))
+            return cursor.fetchall()
+    
+    def get_tournament_bets_by_user(self, user_id: int, tournament_id: int):
+        """Получение ставок пользователя в конкретном турнире"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT ub.*, m.match_date, m.match_time, m.team1, m.team2
+                FROM user_bets ub
+                JOIN matches m ON ub.match_id = m.id
+                WHERE ub.user_id = ? AND m.tournament_id = ?
+                ORDER BY m.match_date, m.match_time
+            ''', (user_id, tournament_id))
+            return cursor.fetchall()
+    
+    def get_user_bets_count(self, user_id: int) -> int:
+        """Получение количества ставок пользователя"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM user_bets WHERE user_id = ?', (user_id,))
+            return cursor.fetchone()[0]

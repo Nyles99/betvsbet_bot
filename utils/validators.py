@@ -40,3 +40,22 @@ def format_phone_number(phone: str) -> str:
         return '+7' + digits
     else:
         return phone
+
+def validate_score(score: str) -> bool:
+    """Валидация счета матча в формате X-Y"""
+    pattern = r'^\d+-\d+$'
+    if not bool(re.match(pattern, score)):
+        return False
+    
+    # Проверяем что числа не слишком большие
+    parts = score.split('-')
+    if len(parts) != 2:
+        return False
+    
+    try:
+        score1 = int(parts[0])
+        score2 = int(parts[1])
+        # Ограничим разумными значениями (например, до 20 голов)
+        return 0 <= score1 <= 20 and 0 <= score2 <= 20
+    except ValueError:
+        return False
