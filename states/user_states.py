@@ -11,10 +11,6 @@ class AdminStates(StatesGroup):
     waiting_for_match_time = State()
     waiting_for_team1 = State()
     waiting_for_team2 = State()
-    waiting_for_edit_match_date = State()
-    waiting_for_edit_match_time = State()
-    waiting_for_edit_team1 = State()
-    waiting_for_edit_team2 = State()
 
 class UserBetStates(StatesGroup):
     waiting_for_score = State()

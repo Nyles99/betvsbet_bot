@@ -28,12 +28,6 @@ def get_main_inline_keyboard():
         InlineKeyboardButton("📞 О нас", callback_data="about")
     )
 
-def get_back_to_tournament_keyboard(tournament_id):
-    """Клавиатура с кнопкой Назад к турниру"""
-    return InlineKeyboardMarkup().add(
-        InlineKeyboardButton("🔙 Назад к турниру", callback_data=f"user_tournament_{tournament_id}")
-    )
-
 def get_profile_inline_keyboard():
     """Инлайн клавиатура для личного кабинета"""
     return InlineKeyboardMarkup(row_width=2).add(
@@ -210,11 +204,11 @@ def get_admin_users_keyboard():
         InlineKeyboardButton("🔙 Назад в админку", callback_data="admin_main")
     )
 
-def get_back_admin_keyboard():
-    """Клавиатура с кнопкой Назад в админку"""
+def get_back_keyboard(back_data="main_menu", text="🔙 Назад"):
+    """Универсальная клавиатура с кнопкой Назад"""
     return InlineKeyboardMarkup().add(
-        InlineKeyboardButton("🔙 Назад", callback_data="admin_main")
-    )
+        InlineKeyboardButton(text, callback_data=back_data)
+    )    
 
 def get_cancel_keyboard():
     """Клавиатура для отмены действия"""
@@ -232,36 +226,6 @@ def get_cancel_to_matches_keyboard(tournament_id):
     """Клавиатура для отмены действия с возвратом к матчам"""
     return InlineKeyboardMarkup().add(
         InlineKeyboardButton("❌ Отмена", callback_data=f"tournament_matches_{tournament_id}")
-    )
-
-def get_back_inline_keyboard():
-    """Клавиатура с кнопкой Назад"""
-    return InlineKeyboardMarkup().add(
-        InlineKeyboardButton("🔙 Назад", callback_data="main_menu")
-    )
-
-def get_back_to_profile_keyboard():
-    """Клавиатура с кнопкой Назад в профиль"""
-    return InlineKeyboardMarkup().add(
-        InlineKeyboardButton("🔙 Назад", callback_data="profile")
-    )
-
-def get_back_to_bets_keyboard():
-    """Клавиатура с кнопкой Назад к ставкам"""
-    return InlineKeyboardMarkup().add(
-        InlineKeyboardButton("🔙 Назад", callback_data="my_bets")
-    )
-
-def get_back_to_make_bet_keyboard():
-    """Клавиатура с кнопкой Назад к созданию ставки"""
-    return InlineKeyboardMarkup().add(
-        InlineKeyboardButton("🔙 Назад", callback_data="make_bet")
-    )
-
-def get_back_to_matches_keyboard():
-    """Клавиатура с кнопкой Назад к матчам"""
-    return InlineKeyboardMarkup().add(
-        InlineKeyboardButton("🔙 Назад к матчам", callback_data="make_bet")
     )
 
 def remove_keyboard():
