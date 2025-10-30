@@ -503,8 +503,8 @@ async def delete_match_callback(callback: CallbackQuery):
     else:
         await callback.answer("❌ Ошибка при удалении матча.", show_alert=True)
 
-async def cancel_admin_action(callback: CallbackQuery, state: FSMContext):
-    """Отмена действия в админ-панели"""
+async def admin_back_to_main(callback: CallbackQuery, state: FSMContext):
+    """Возврат в главное меню админа из админ-панели"""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ У вас нет прав доступа.", show_alert=True)
         return
@@ -521,7 +521,7 @@ def register_admin_handlers(dp: Dispatcher):
     dp.register_message_handler(admin_command, commands=['admin'])
     
     # Главное меню админа
-    dp.register_callback_query_handler(admin_main_callback, lambda c: c.data == "admin_main", state="*")
+    dp.register_callback_query_handler(admin_back_to_main, lambda c: c.data == "admin_main", state="*")
     
     # Разделы админ-панели
     dp.register_callback_query_handler(admin_tournaments_callback, lambda c: c.data == "admin_tournaments", state="*")
@@ -540,9 +540,6 @@ def register_admin_handlers(dp: Dispatcher):
     dp.register_callback_query_handler(add_match_callback, lambda c: c.data.startswith("add_match_"), state="*")
     dp.register_callback_query_handler(admin_match_detail_callback, lambda c: c.data.startswith("admin_match_"), state="*")
     dp.register_callback_query_handler(delete_match_callback, lambda c: c.data.startswith("delete_match_"))
-    
-    # Отмена действий
-    dp.register_callback_query_handler(cancel_admin_action, lambda c: c.data == "admin_main", state="*")
     
     # FSM для добавления турнира
     dp.register_message_handler(process_tournament_name, state=AdminStates.waiting_for_tournament_name)
