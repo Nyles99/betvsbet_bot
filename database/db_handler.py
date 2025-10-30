@@ -18,8 +18,9 @@ class DatabaseHandler:
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     phone_number TEXT UNIQUE NOT NULL,
-                    username TEXT,
+                    username TEXT UNIQUE,
                     full_name TEXT,
+                    password_hash TEXT NOT NULL,
                     registration_date TEXT,
                     last_login TEXT
                 )
@@ -95,8 +96,8 @@ class DatabaseHandler:
                     phone_number=row[1],
                     username=row[2],
                     full_name=row[3],
-                    registration_date=row[4],
-                    last_login=row[5]
+                    registration_date=row[5],  # Обновленный индекс
+                    last_login=row[6]         # Обновленный индекс
                 )
             return None
     
@@ -411,3 +412,108 @@ class DatabaseHandler:
             cursor = conn.cursor()
             cursor.execute('SELECT COUNT(*) FROM user_bets WHERE user_id = ?', (user_id,))
             return cursor.fetchone()[0]
+    
+    #def get_table_structure(self, table_name: str):
+    #    """Просмотр структуры таблицы"""
+    #    with sqlite3.connect(self.db_name) as conn:
+    #        cursor = conn.cursor()
+    #        cursor.execute(f"PRAGMA table_info({table_name})")
+    #        return cursor.fetchall()
+        
+    def get_tournament_participants(self, tournament_id: int):
+        """Получение всех участников турнира"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT DISTINCT u.*
+                FROM users u
+                JOIN user_bets ub ON u.user_id = ub.user_id
+                JOIN matches m ON ub.match_id = m.id
+                WHERE m.tournament_id = ?
+                ORDER BY u.registration_date
+            ''', (tournament_id,))
+            rows = cursor.fetchall()
+            
+            users = []
+            for row in rows:
+                users.append(User(
+                    user_id=row[0],
+                    phone_number=row[1],
+                    username=row[2],
+                    full_name=row[3],
+                    registration_date=row[5],  # Обновленные индексы
+                    last_login=row[6]
+                ))
+            return users
+    
+    def register_user(self, user_id: int, phone_number: str, username: str, password_hash: str) -> bool:
+        """Регистрация нового пользователя с логином и паролем"""
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO users (user_id, phone_number, username, password_hash, registration_date, last_login)
+                    VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+                ''', (user_id, phone_number, username, password_hash))
+                conn.commit()
+                return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def get_user_by_username(self, username: str):
+        """Получение пользователя по логину"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+            row = cursor.fetchone()
+            
+            if row:
+                # Выведем структуру для отладки
+                print(f"Row structure: {row}")
+                
+                # Безопасное создание объекта User
+                try:
+                    return User(
+                        user_id=row[0],
+                        phone_number=row[1],
+                        username=row[2],
+                        full_name=row[3] if len(row) > 3 else None,
+                        registration_date=row[4] if len(row) > 4 else None,
+                        last_login=row[5] if len(row) > 5 else None
+                    )
+                except IndexError as e:
+                    print(f"Index error: {e}, row length: {len(row)}")
+                    # Возвращаем базовый объект с доступными данными
+                    return User(
+                        user_id=row[0],
+                        phone_number=row[1],
+                        username=row[2],
+                        full_name=None,
+                        registration_date=None,
+                        last_login=None
+                    )
+            return None
+
+    def verify_password(self, user_id: int, password_hash: str) -> bool:
+        """Проверка пароля пользователя"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT password_hash FROM users WHERE user_id = ?', (user_id,))
+            row = cursor.fetchone()
+            
+            if row and row[0] == password_hash:
+                return True
+            return False
+
+    def is_username_taken(self, username: str) -> bool:
+        """Проверка, занят ли логин"""
+        return self.get_user_by_username(username) is not None
+
+    def update_last_login(self, user_id: int):
+        """Обновление времени последнего входа"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE users SET last_login = datetime('now') WHERE user_id = ?
+            ''', (user_id,))
+            conn.commit()

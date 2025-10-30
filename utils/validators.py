@@ -59,3 +59,7 @@ def validate_score(score: str) -> bool:
         return 0 <= score1 <= 20 and 0 <= score2 <= 20
     except ValueError:
         return False
+
+def validate_password(password: str) -> bool:
+    """Валидация пароля"""
+    return len(password) >= 6

@@ -6,6 +6,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
 from handlers.start import register_start_handlers
+from handlers.registration import register_registration_handlers
+from handlers.login import register_login_handlers
 from handlers.auth import register_auth_handlers
 from handlers.profile import register_profile_handlers
 from handlers.callbacks import register_callback_handlers
@@ -36,7 +38,9 @@ async def main():
     
     # Регистрация обработчиков
     register_start_handlers(dp)
-    register_auth_handlers(dp)
+    register_registration_handlers(dp)
+    register_login_handlers(dp)
+
     register_profile_handlers(dp)
     register_callback_handlers(dp)
     register_admin_handlers(dp)

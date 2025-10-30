@@ -1,5 +1,14 @@
 from aiogram.dispatcher.filters.state import State, StatesGroup
 
+class RegistrationStates(StatesGroup):
+    waiting_for_phone = State()
+    waiting_for_username = State()
+    waiting_for_password = State()
+
+class LoginStates(StatesGroup):
+    waiting_for_username = State()
+    waiting_for_password = State()
+
 class ProfileStates(StatesGroup):
     waiting_for_username = State()
     waiting_for_full_name = State()

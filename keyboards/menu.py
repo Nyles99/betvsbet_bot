@@ -11,6 +11,27 @@ def get_main_menu():
     return ReplyKeyboardMarkup([
         ['📱 Отправить номер телефона']
     ], resize_keyboard=True)
+    
+def get_start_keyboard():
+    """Стартовая клавиатура с входом и регистрацией"""
+    return InlineKeyboardMarkup(row_width=2).add(
+        InlineKeyboardButton("🚪 Вход", callback_data="login"),
+        InlineKeyboardButton("📝 Регистрация", callback_data="register"),
+        InlineKeyboardButton("ℹ️ Помощь", callback_data="help"),
+        InlineKeyboardButton("📞 О нас", callback_data="about")
+    )
+
+def get_cancel_registration_keyboard():
+    """Клавиатура для отмены регистрации"""
+    return InlineKeyboardMarkup().add(
+        InlineKeyboardButton("❌ Отмена", callback_data="start")
+    )
+
+def get_cancel_login_keyboard():
+    """Клавиатура для отмены входа"""
+    return InlineKeyboardMarkup().add(
+        InlineKeyboardButton("❌ Отмена", callback_data="start")
+    )
 
 def get_phone_keyboard():
     """Клавиатура для запроса номера телефона"""
@@ -34,7 +55,7 @@ def get_profile_inline_keyboard():
         InlineKeyboardButton("✏️ Изменить логин", callback_data="change_username"),
         InlineKeyboardButton("✏️ Изменить ФИО", callback_data="change_fullname"),
         InlineKeyboardButton("📊 Мой профиль", callback_data="my_profile"),
-        InlineKeyboardButton("📋 Мои ставки", callback_data="my_bets"),
+        InlineKeyboardButton("🏆 Мои турниры", callback_data="my_tournaments"),
         InlineKeyboardButton("🔙 Назад", callback_data="main_menu")
     )
 
@@ -56,6 +77,61 @@ def get_user_tournaments_keyboard(tournaments):
     )
     
     return keyboard
+
+def get_user_tournaments_list_keyboard(tournaments):
+    """Клавиатура списка турниров пользователя"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    
+    # Добавляем кнопки для каждого турнира
+    for tournament in tournaments:
+        keyboard.add(InlineKeyboardButton(
+            f"🏆 {tournament[1]}", 
+            callback_data=f"user_tournament_detail_{tournament[0]}"
+        ))
+    
+    # Кнопка назад
+    keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="profile"))
+    
+    return keyboard
+
+def get_tournament_detail_keyboard(tournament_id, page=0):
+    """Клавиатура детальной информации о турнире"""
+    return InlineKeyboardMarkup(row_width=2).add(
+        InlineKeyboardButton("📋 Мои ставки", callback_data=f"tournament_my_bets_{tournament_id}"),
+        InlineKeyboardButton("📊 Общая таблица", callback_data=f"tournament_leaderboard_{tournament_id}"),
+        InlineKeyboardButton("📖 Правила", callback_data=f"tournament_rules_{tournament_id}"),
+        InlineKeyboardButton("👥 Игроки турнира", callback_data=f"tournament_players_{tournament_id}_0"),  # Добавляем _0 для первой страницы
+        InlineKeyboardButton("🔙 Назад", callback_data="my_tournaments")
+    )
+
+def get_tournament_players_keyboard(tournament_id, page, total_pages, players_count):
+    """Клавиатура списка игроков турнира с пагинацией"""
+    keyboard = InlineKeyboardMarkup(row_width=3)
+    
+    # Кнопки пагинации (только если есть больше одной страницы)
+    if total_pages > 1:
+        pagination_buttons = []
+        if page > 0:
+            pagination_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"tournament_players_{tournament_id}_{page-1}"))
+        
+        pagination_buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="no_action"))
+        
+        if page < total_pages - 1:
+            pagination_buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"tournament_players_{tournament_id}_{page+1}"))
+        
+        if pagination_buttons:
+            keyboard.row(*pagination_buttons)
+    
+    # Кнопка назад к деталям турнира
+    keyboard.row(InlineKeyboardButton("🔙 Назад к турниру", callback_data=f"user_tournament_detail_{tournament_id}"))
+    
+    return keyboard
+
+def get_player_detail_keyboard(tournament_id, page):
+    """Клавиатура детальной информации об игроке"""
+    return InlineKeyboardMarkup().add(
+        InlineKeyboardButton("🔙 Назад к игрокам", callback_data=f"tournament_players_{tournament_id}_{page}")
+    )
 
 def get_user_tournament_matches_keyboard(tournament_id, matches):
     """Клавиатура матчей турнира для пользователя"""
@@ -89,7 +165,7 @@ def get_available_matches_keyboard(matches):
             match_text = match_text[:57] + "..."
         keyboard.add(InlineKeyboardButton(
             match_text, 
-            callback_data=f"user_match_{match[0]}"  # Изменяем на user_match_ для единообразия
+            callback_data=f"user_match_{match[0]}"
         ))
     
     # Кнопка назад
@@ -121,7 +197,7 @@ def get_user_tournament_bets_keyboard(tournament_id, bets):
     # так как это просто отображение информации
     
     # Кнопка назад
-    keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="my_bets"))
+    keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="my_tournaments"))
     
     return keyboard
 
@@ -231,3 +307,9 @@ def get_cancel_to_matches_keyboard(tournament_id):
 def remove_keyboard():
     """Убрать клавиатуру"""
     return ReplyKeyboardRemove()
+
+def get_no_action_keyboard():
+    """Клавиатура для кнопок без действия"""
+    return InlineKeyboardMarkup().add(
+        InlineKeyboardButton("⏳ Функция в разработке", callback_data="no_action")
+    )
