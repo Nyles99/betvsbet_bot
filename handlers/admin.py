@@ -131,14 +131,13 @@ async def admin_stats_callback(callback: CallbackQuery, state: FSMContext):
 
 # Управление турнирами
 async def tournament_detail_callback(callback: CallbackQuery, state: FSMContext):
-    """Детальная информация о турнире (обработка tournament_{id})"""
+    """Детальная информация о турнире"""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ У вас нет прав доступа.", show_alert=True)
         return
     
     await state.finish()
     
-    # Получаем tournament_id из callback data (формат: tournament_{id})
     tournament_id = int(callback.data.split('_')[1])
     
     db = DatabaseHandler('users.db')
@@ -165,14 +164,13 @@ async def tournament_detail_callback(callback: CallbackQuery, state: FSMContext)
         await callback.answer("❌ Турнир не найден.", show_alert=True)
 
 async def tournament_matches_callback(callback: CallbackQuery, state: FSMContext):
-    """Список матчей турнира для админа (обработка tournament_matches_{id})"""
+    """Список матчей турнира для админа"""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ У вас нет прав доступа.", show_alert=True)
         return
     
     await state.finish()
     
-    # Получаем tournament_id из callback data (формат: tournament_matches_{id})
     tournament_id = int(callback.data.split('_')[2])
     
     db = DatabaseHandler('users.db')
@@ -183,7 +181,8 @@ async def tournament_matches_callback(callback: CallbackQuery, state: FSMContext
         if matches:
             text = f"🏆 Матчи турнира: {tournament[1]}\n\n"
             for match in matches:
-                text += f"📅 {match[2]} {match[3]} - {match[4]} vs {match[5]}\n\n"
+                status = "⏰ Истек" if db.is_match_expired(match[2], match[3]) else "✅ Активен"
+                text += f"📅 {match[2]} {match[3]} - {match[4]} vs {match[5]} ({status})\n\n"
         else:
             text = f"🏆 В турнире '{tournament[1]}' пока нет матчей.\n\nДобавьте первый матч!"
         
@@ -356,7 +355,6 @@ async def add_match_callback(callback: CallbackQuery, state: FSMContext):
 
 async def process_match_date(message: Message, state: FSMContext):
     """Обработка даты матча"""
-    # Простая валидация формата даты
     date_parts = message.text.split('.')
     if len(date_parts) != 3 or not all(part.isdigit() for part in date_parts):
         await message.answer("❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ (например: 04.11.2025):")
@@ -373,7 +371,6 @@ async def process_match_date(message: Message, state: FSMContext):
 
 async def process_match_time(message: Message, state: FSMContext):
     """Обработка времени матча"""
-    # Простая валидация формата времени
     time_parts = message.text.split(':')
     if len(time_parts) != 2 or not all(part.isdigit() for part in time_parts):
         await message.answer("❌ Неверный формат времени. Используйте ЧЧ:ММ (например: 20:45):")
@@ -504,7 +501,7 @@ async def delete_match_callback(callback: CallbackQuery):
         await callback.answer("❌ Ошибка при удалении матча.", show_alert=True)
 
 async def admin_back_to_main(callback: CallbackQuery, state: FSMContext):
-    """Возврат в главное меню админа из админ-панели"""
+    """Возврат в главное меню админа"""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ У вас нет прав доступа.", show_alert=True)
         return

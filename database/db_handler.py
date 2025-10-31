@@ -1,6 +1,8 @@
 import sqlite3
 import logging
 from typing import Optional, List
+from datetime import datetime
+import pytz
 from database.models import User
 
 class DatabaseHandler:
@@ -8,6 +10,79 @@ class DatabaseHandler:
         self.db_name = db_name
         self.init_database()
     
+    def get_moscow_time(self):
+        """Получение текущего московского времени"""
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        return datetime.now(moscow_tz)
+
+    def is_match_expired(self, match_date: str, match_time: str) -> bool:
+        """Проверка, истекло ли время матча"""
+        try:
+            moscow_tz = pytz.timezone('Europe/Moscow')
+            current_time = self.get_moscow_time()
+            
+            # Парсим дату и время матча
+            match_datetime_str = f"{match_date} {match_time}"
+            match_datetime = datetime.strptime(match_datetime_str, '%d.%m.%Y %H:%M')
+            match_datetime = moscow_tz.localize(match_datetime)
+            
+            # Сравниваем с текущим временем
+            return current_time >= match_datetime
+        except Exception as e:
+            logging.error(f"Error checking match expiration: {e}")
+            return False
+    
+    def get_available_tournament_matches(self, tournament_id: int, user_id: int):
+        """Получение доступных матчей турнира (не истекших и без ставок пользователя)"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT m.* 
+                FROM matches m
+                WHERE m.tournament_id = ? 
+                AND m.id NOT IN (
+                    SELECT match_id FROM user_bets WHERE user_id = ?
+                )
+                ORDER BY m.match_date, m.match_time
+            ''', (tournament_id, user_id))
+            all_matches = cursor.fetchall()
+            
+            # Фильтруем матчи по времени
+            available_matches = []
+            for match in all_matches:
+                if not self.is_match_expired(match[2], match[3]):
+                    available_matches.append(match)
+            
+            return available_matches
+    
+    def get_expired_matches(self):
+        """Получение всех истекших матчей"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM matches')
+            all_matches = cursor.fetchall()
+            
+            expired_matches = []
+            for match in all_matches:
+                if self.is_match_expired(match[2], match[3]):
+                    expired_matches.append(match)
+            
+            return expired_matches
+    
+    def update_match_status(self, match_id: int, status: str) -> bool:
+        """Обновление статуса матча"""
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE matches SET status = ? WHERE id = ?
+                ''', (status, match_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logging.error(f"Error updating match status: {e}")
+            return False
+        
     def init_database(self):
         """Инициализация базы данных"""
         with sqlite3.connect(self.db_name) as conn:
@@ -69,15 +144,36 @@ class DatabaseHandler:
             ''')
             conn.commit()
     
-    def add_user(self, user_id: int, phone_number: str) -> bool:
-        """Добавление нового пользователя"""
+    def is_phone_taken(self, phone_number: str) -> bool:
+        """Проверка, занят ли номер телефона"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT user_id FROM users WHERE phone_number = ?', (phone_number,))
+            return cursor.fetchone() is not None
+    
+    def is_username_taken(self, username: str) -> bool:
+        """Проверка, занят ли логин"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT user_id FROM users WHERE username = ?', (username,))
+            return cursor.fetchone() is not None
+    
+    def register_user(self, user_id: int, phone_number: str, username: str, password_hash: str, full_name: str = None) -> bool:
+        """Регистрация нового пользователя с логином, паролем и ФИО"""
         try:
             with sqlite3.connect(self.db_name) as conn:
                 cursor = conn.cursor()
+                
+                # Проверяем, не заняты ли номер или логин
+                cursor.execute('SELECT user_id FROM users WHERE phone_number = ? OR username = ?', (phone_number, username))
+                existing_user = cursor.fetchone()
+                if existing_user:
+                    return False
+                
                 cursor.execute('''
-                    INSERT INTO users (user_id, phone_number, registration_date, last_login)
-                    VALUES (?, ?, datetime('now'), datetime('now'))
-                ''', (user_id, phone_number))
+                    INSERT INTO users (user_id, phone_number, username, full_name, password_hash, registration_date, last_login)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (user_id, phone_number, username, full_name, password_hash, self.get_moscow_time(), self.get_moscow_time()))
                 conn.commit()
                 return True
         except sqlite3.IntegrityError:
@@ -96,10 +192,48 @@ class DatabaseHandler:
                     phone_number=row[1],
                     username=row[2],
                     full_name=row[3],
-                    registration_date=row[5],  # Обновленный индекс
-                    last_login=row[6]         # Обновленный индекс
+                    registration_date=row[5],
+                    last_login=row[6]
                 )
             return None
+    
+    def get_user_by_username(self, username: str):
+        """Получение пользователя по логину"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+            row = cursor.fetchone()
+            
+            if row:
+                return User(
+                    user_id=row[0],
+                    phone_number=row[1],
+                    username=row[2],
+                    full_name=row[3],
+                    registration_date=row[5],
+                    last_login=row[6]
+                )
+            return None
+    
+    def verify_password(self, user_id: int, password_hash: str) -> bool:
+        """Проверка пароля пользователя"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT password_hash FROM users WHERE user_id = ?', (user_id,))
+            row = cursor.fetchone()
+            
+            if row and row[0] == password_hash:
+                return True
+            return False
+    
+    def update_last_login(self, user_id: int):
+        """Обновление времени последнего входа"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE users SET last_login = ? WHERE user_id = ?
+            ''', (self.get_moscow_time(), user_id))
+            conn.commit()
     
     def update_profile(self, user_id: int, username: str = None, full_name: str = None) -> bool:
         """Обновление профиля пользователя"""
@@ -109,24 +243,39 @@ class DatabaseHandler:
                 
                 if username and full_name:
                     cursor.execute('''
-                        UPDATE users SET username = ?, full_name = ?, last_login = datetime('now')
+                        UPDATE users SET username = ?, full_name = ?, last_login = ?
                         WHERE user_id = ?
-                    ''', (username, full_name, user_id))
+                    ''', (username, full_name, self.get_moscow_time(), user_id))
                 elif username:
                     cursor.execute('''
-                        UPDATE users SET username = ?, last_login = datetime('now')
+                        UPDATE users SET username = ?, last_login = ?
                         WHERE user_id = ?
-                    ''', (username, user_id))
+                    ''', (username, self.get_moscow_time(), user_id))
                 elif full_name:
                     cursor.execute('''
-                        UPDATE users SET full_name = ?, last_login = datetime('now')
+                        UPDATE users SET full_name = ?, last_login = ?
                         WHERE user_id = ?
-                    ''', (full_name, user_id))
+                    ''', (full_name, self.get_moscow_time(), user_id))
                 
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:
             logging.error(f"Error updating profile: {e}")
+            return False
+    
+    def update_user_password(self, user_id: int, new_password_hash: str) -> bool:
+        """Обновление пароля пользователя"""
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE users SET password_hash = ?, last_login = ?
+                    WHERE user_id = ?
+                ''', (new_password_hash, self.get_moscow_time(), user_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logging.error(f"Error updating password: {e}")
             return False
     
     def user_exists(self, user_id: int) -> bool:
@@ -147,8 +296,8 @@ class DatabaseHandler:
                     phone_number=row[1],
                     username=row[2],
                     full_name=row[3],
-                    registration_date=row[4],
-                    last_login=row[5]
+                    registration_date=row[5],
+                    last_login=row[6]
                 ))
             return users
     
@@ -167,8 +316,8 @@ class DatabaseHandler:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO tournaments (name, description, created_date, created_by)
-                    VALUES (?, ?, datetime('now'), ?)
-                ''', (name, description, created_by))
+                    VALUES (?, ?, ?, ?)
+                ''', (name, description, self.get_moscow_time(), created_by))
                 conn.commit()
                 return True
         except Exception as e:
@@ -233,8 +382,8 @@ class DatabaseHandler:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO matches (tournament_id, match_date, match_time, team1, team2, created_date, created_by)
-                    VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
-                ''', (tournament_id, match_date, match_time, team1, team2, created_by))
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (tournament_id, match_date, match_time, team1, team2, self.get_moscow_time(), created_by))
                 conn.commit()
                 return True
         except Exception as e:
@@ -314,8 +463,8 @@ class DatabaseHandler:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO user_bets (user_id, match_id, score, bet_date)
-                    VALUES (?, ?, ?, datetime('now'))
-                ''', (user_id, match_id, score))
+                    VALUES (?, ?, ?, ?)
+                ''', (user_id, match_id, score, self.get_moscow_time()))
                 conn.commit()
                 return True
         except sqlite3.IntegrityError:
@@ -331,9 +480,9 @@ class DatabaseHandler:
             with sqlite3.connect(self.db_name) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    UPDATE user_bets SET score = ?, bet_date = datetime('now')
+                    UPDATE user_bets SET score = ?, bet_date = ?
                     WHERE user_id = ? AND match_id = ?
-                ''', (score, user_id, match_id))
+                ''', (score, self.get_moscow_time(), user_id, match_id))
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:
@@ -413,13 +562,6 @@ class DatabaseHandler:
             cursor.execute('SELECT COUNT(*) FROM user_bets WHERE user_id = ?', (user_id,))
             return cursor.fetchone()[0]
     
-    #def get_table_structure(self, table_name: str):
-    #    """Просмотр структуры таблицы"""
-    #    with sqlite3.connect(self.db_name) as conn:
-    #        cursor = conn.cursor()
-    #        cursor.execute(f"PRAGMA table_info({table_name})")
-    #        return cursor.fetchall()
-        
     def get_tournament_participants(self, tournament_id: int):
         """Получение всех участников турнира"""
         with sqlite3.connect(self.db_name) as conn:
@@ -441,79 +583,7 @@ class DatabaseHandler:
                     phone_number=row[1],
                     username=row[2],
                     full_name=row[3],
-                    registration_date=row[5],  # Обновленные индексы
+                    registration_date=row[5],
                     last_login=row[6]
                 ))
             return users
-    
-    def register_user(self, user_id: int, phone_number: str, username: str, password_hash: str) -> bool:
-        """Регистрация нового пользователя с логином и паролем"""
-        try:
-            with sqlite3.connect(self.db_name) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO users (user_id, phone_number, username, password_hash, registration_date, last_login)
-                    VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
-                ''', (user_id, phone_number, username, password_hash))
-                conn.commit()
-                return True
-        except sqlite3.IntegrityError:
-            return False
-
-    def get_user_by_username(self, username: str):
-        """Получение пользователя по логину"""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
-            row = cursor.fetchone()
-            
-            if row:
-                # Выведем структуру для отладки
-                print(f"Row structure: {row}")
-                
-                # Безопасное создание объекта User
-                try:
-                    return User(
-                        user_id=row[0],
-                        phone_number=row[1],
-                        username=row[2],
-                        full_name=row[3] if len(row) > 3 else None,
-                        registration_date=row[4] if len(row) > 4 else None,
-                        last_login=row[5] if len(row) > 5 else None
-                    )
-                except IndexError as e:
-                    print(f"Index error: {e}, row length: {len(row)}")
-                    # Возвращаем базовый объект с доступными данными
-                    return User(
-                        user_id=row[0],
-                        phone_number=row[1],
-                        username=row[2],
-                        full_name=None,
-                        registration_date=None,
-                        last_login=None
-                    )
-            return None
-
-    def verify_password(self, user_id: int, password_hash: str) -> bool:
-        """Проверка пароля пользователя"""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT password_hash FROM users WHERE user_id = ?', (user_id,))
-            row = cursor.fetchone()
-            
-            if row and row[0] == password_hash:
-                return True
-            return False
-
-    def is_username_taken(self, username: str) -> bool:
-        """Проверка, занят ли логин"""
-        return self.get_user_by_username(username) is not None
-
-    def update_last_login(self, user_id: int):
-        """Обновление времени последнего входа"""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                UPDATE users SET last_login = datetime('now') WHERE user_id = ?
-            ''', (user_id,))
-            conn.commit()

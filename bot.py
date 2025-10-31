@@ -8,10 +8,10 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from handlers.start import register_start_handlers
 from handlers.registration import register_registration_handlers
 from handlers.login import register_login_handlers
-from handlers.auth import register_auth_handlers
 from handlers.profile import register_profile_handlers
 from handlers.callbacks import register_callback_handlers
 from handlers.admin import register_admin_handlers
+from utils.match_checker import start_match_checker
 
 # Загружаем переменные окружения из .env файла
 load_dotenv()
@@ -40,7 +40,6 @@ async def main():
     register_start_handlers(dp)
     register_registration_handlers(dp)
     register_login_handlers(dp)
-
     register_profile_handlers(dp)
     register_callback_handlers(dp)
     register_admin_handlers(dp)
@@ -48,6 +47,10 @@ async def main():
     # Запуск бота
     try:
         logging.info("Бот запущен...")
+        
+        # Запускаем фоновую задачу проверки матчей
+        asyncio.create_task(start_match_checker())
+        
         await dp.start_polling()
     except Exception as e:
         logging.error(f"Ошибка при запуске бота: {e}")
