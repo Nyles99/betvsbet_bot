@@ -54,6 +54,18 @@ def get_tournaments_main_keyboard():
         InlineKeyboardButton("🔙 Назад", callback_data="main_menu")
     )
 
+def get_admin_match_detail_keyboard(match_id, tournament_id):
+    """Клавиатура для конкретного матча в админке"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    keyboard.add(
+        InlineKeyboardButton("📝 Внести счет", callback_data=f"enter_result_{match_id}"),
+        InlineKeyboardButton("🗑️ Удалить матч", callback_data=f"delete_match_{match_id}"),
+        InlineKeyboardButton("🔙 Назад к матчам", callback_data=f"tournament_matches_{tournament_id}")
+    )
+    
+    return keyboard
+
 def get_all_tournaments_keyboard(tournaments):
     """Клавиатура всех доступных турниров"""
     keyboard = InlineKeyboardMarkup(row_width=1)
@@ -260,14 +272,6 @@ def get_admin_tournament_matches_keyboard(tournament_id, matches):
     )
     
     return keyboard
-
-def get_admin_match_detail_keyboard(match_id, tournament_id):
-    """Клавиатура для конкретного матча в админке"""
-    return InlineKeyboardMarkup(row_width=2).add(
-        InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_match_{match_id}"),
-        InlineKeyboardButton("🗑️ Удалить матч", callback_data=f"delete_match_{match_id}"),
-        InlineKeyboardButton("🔙 Назад к матчам", callback_data=f"tournament_matches_{tournament_id}")
-    )
 
 def get_admin_users_keyboard():
     """Клавиатура управления пользователями"""

@@ -20,6 +20,7 @@ class AdminStates(StatesGroup):
     waiting_for_match_time = State()
     waiting_for_team1 = State()
     waiting_for_team2 = State()
+    waiting_for_match_result = State()
 
 class UserBetStates(StatesGroup):
     """Состояния для ставок пользователя"""

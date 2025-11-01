@@ -14,6 +14,7 @@ from keyboards.menu import (
     get_cancel_to_matches_keyboard
 )
 from states.user_states import AdminStates
+from utils.validators import validate_score  # Добавляем импорт
 from config import config
 
 def is_admin(user_id: int) -> bool:
@@ -181,7 +182,9 @@ async def tournament_matches_callback(callback: CallbackQuery, state: FSMContext
         if matches:
             text = f"🏆 Матчи турнира: {tournament[1]}\n\n"
             for match in matches:
-                status = "⏰ Истек" if db.is_match_expired(match[2], match[3]) else "✅ Активен"
+                # Проверяем истекло ли время матча
+                is_expired = db.is_match_expired(match[2], match[3])
+                status = "⏰ Истек" if is_expired else "✅ Активен"
                 text += f"📅 {match[2]} {match[3]} - {match[4]} vs {match[5]} ({status})\n\n"
         else:
             text = f"🏆 В турнире '{tournament[1]}' пока нет матчей.\n\nДобавьте первый матч!"
@@ -450,6 +453,9 @@ async def admin_match_detail_callback(callback: CallbackQuery, state: FSMContext
     match = db.get_match(match_id)
     
     if match:
+        # Получаем количество ставок на матч
+        bets_count = db.get_match_bets_count(match_id)
+        
         text = f"""
 ⚽ Информация о матче:
 
@@ -458,15 +464,114 @@ async def admin_match_detail_callback(callback: CallbackQuery, state: FSMContext
 🏆 Команда 1: {match[4]}
 🏆 Команда 2: {match[5]}
 🔰 Статус: {match[6]}
-📅 Создан: {match[7]}
+📊 Ставок сделано: {bets_count}
+📅 Создан: {match[7] if match[7] else 'Не указана'}
 🆔 ID: {match[0]}
         """
+        
+        # Добавляем информацию о результате, если он есть и не является датой
+        match_result = match[8] if len(match) > 8 else None
+        
+        # Простая проверка: если результат содержит "-" и состоит только из цифр и дефиса, то это счет
+        if (match_result and 
+            match_result != 'None' and 
+            '-' in str(match_result) and
+            all(c.isdigit() or c == '-' for c in str(match_result).strip())):
+            text += f"\n🎯 Результат: {match_result}"
+        else:
+            text += f"\n🎯 Результат: `Неизвестно`"  # Зеленый шрифт
+        
         await callback.message.edit_text(
             text,
             reply_markup=get_admin_match_detail_keyboard(match_id, match[1])
         )
     else:
         await callback.answer("❌ Матч не найден.", show_alert=True)
+
+async def enter_result_callback(callback: CallbackQuery, state: FSMContext):
+    """Начало ввода результата матча"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа.", show_alert=True)
+        return
+    
+    match_id = int(callback.data.split('_')[2])
+    
+    db = DatabaseHandler('users.db')
+    match = db.get_match(match_id)
+    
+    if not match:
+        await callback.answer("❌ Матч не найден.", show_alert=True)
+        return
+    
+    async with state.proxy() as data:
+        data['match_id'] = match_id
+        data['tournament_id'] = match[1]
+    
+    await callback.message.edit_text(
+        f"⚽ Ввод результата матча:\n\n"
+        f"📅 {match[2]} {match[3]}\n"
+        f"🏆 {match[4]} vs {match[5]}\n\n"
+        f"📝 Введите окончательный счет матча в формате X-Y (например: 2-1):",
+        reply_markup=get_cancel_to_matches_keyboard(match[1])
+    )
+    await AdminStates.waiting_for_match_result.set()
+
+async def process_match_result(message: Message, state: FSMContext):
+    """Обработка результата матча"""
+    result = message.text.strip()
+    
+    if not validate_score(result):
+        async with state.proxy() as data:
+            tournament_id = data['tournament_id']
+        
+        await message.answer(
+            "❌ Неверный формат счета. Используйте формат X-Y (например: 2-1). Попробуйте еще раз:",
+            reply_markup=get_cancel_to_matches_keyboard(tournament_id)
+        )
+        return
+    
+    async with state.proxy() as data:
+        match_id = data['match_id']
+        tournament_id = data['tournament_id']
+    
+    db = DatabaseHandler('users.db')
+    
+    if db.update_match_result(match_id, result):
+        await message.answer(
+            f"✅ Результат матча {result} успешно сохранен!",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+        
+        # Возвращаемся к информации о матче
+        match = db.get_match(match_id)
+        match_with_bets = db.get_match_with_bets(match_id)
+        bets_count = match_with_bets[8] if match_with_bets else 0
+        
+        text = f"""
+⚽ Информация о матче:
+
+📅 Дата: {match[2]}
+⏰ Время: {match[3]}
+🏆 Команда 1: {match[4]}
+🏆 Команда 2: {match[5]}
+🔰 Статус: {match[6]}
+🎯 Результат: {match[8]}
+📊 Ставок сделано: {bets_count}
+📅 Создан: {match[7] if match[7] else 'Не указана'}
+🆔 ID: {match[0]}
+        """
+        
+        await message.answer(
+            text,
+            reply_markup=get_admin_match_detail_keyboard(match_id, tournament_id)
+        )
+    else:
+        await message.answer(
+            "❌ Ошибка при сохранении результата.",
+            reply_markup=get_admin_match_detail_keyboard(match_id, tournament_id)
+        )
+    
+    await state.finish()
 
 async def delete_match_callback(callback: CallbackQuery):
     """Удаление матча"""
@@ -518,6 +623,7 @@ def register_admin_handlers(dp: Dispatcher):
     dp.register_message_handler(admin_command, commands=['admin'])
     
     # Главное меню админа
+    dp.register_callback_query_handler(admin_main_callback, lambda c: c.data == "admin_main", state="*")
     dp.register_callback_query_handler(admin_back_to_main, lambda c: c.data == "admin_main", state="*")
     
     # Разделы админ-панели
@@ -536,6 +642,7 @@ def register_admin_handlers(dp: Dispatcher):
     # Управление матчами
     dp.register_callback_query_handler(add_match_callback, lambda c: c.data.startswith("add_match_"), state="*")
     dp.register_callback_query_handler(admin_match_detail_callback, lambda c: c.data.startswith("admin_match_"), state="*")
+    dp.register_callback_query_handler(enter_result_callback, lambda c: c.data.startswith("enter_result_"), state="*")
     dp.register_callback_query_handler(delete_match_callback, lambda c: c.data.startswith("delete_match_"))
     
     # FSM для добавления турнира
@@ -547,3 +654,6 @@ def register_admin_handlers(dp: Dispatcher):
     dp.register_message_handler(process_match_time, state=AdminStates.waiting_for_match_time)
     dp.register_message_handler(process_team1, state=AdminStates.waiting_for_team1)
     dp.register_message_handler(process_team2, state=AdminStates.waiting_for_team2)
+    
+    # FSM для ввода результата матча
+    dp.register_message_handler(process_match_result, state=AdminStates.waiting_for_match_result)

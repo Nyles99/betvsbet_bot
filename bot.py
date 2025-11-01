@@ -36,9 +36,9 @@ async def main():
     storage = MemoryStorage()
     dp = Dispatcher(bot, storage=storage)
     
-    # Регистрация обработчиков
+    # Регистрация обработчиков (ВАЖНО: правильный порядок)
     register_start_handlers(dp)
-    register_registration_handlers(dp)
+    register_registration_handlers(dp)  # Должен быть зарегистрирован
     register_login_handlers(dp)
     register_profile_handlers(dp)
     register_callback_handlers(dp)

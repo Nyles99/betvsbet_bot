@@ -22,6 +22,22 @@ def hash_password(password: str) -> str:
     """Хеширование пароля"""
     return hashlib.sha256(password.encode()).hexdigest()
 
+def _is_datetime_string(self, text: str) -> bool:
+    """Проверяет, является ли строка датой/временем"""
+    if not text:
+        return False
+    # Проверяем паттерны даты/времени
+    datetime_patterns = [
+        r'\d{4}-\d{2}-\d{2}',
+        r'\d{2}:\d{2}:\d{2}',
+        r'\d{4}-\d{2}-\d{2}.*\d{2}:\d{2}:\d{2}'
+    ]
+    import re
+    for pattern in datetime_patterns:
+        if re.search(pattern, str(text)):
+            return True
+    return False
+
 async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup=None):
     """Безопасное редактирование сообщения"""
     try:
@@ -109,7 +125,8 @@ async def my_profile_callback(callback: CallbackQuery, state: FSMContext):
     user = db.get_user(user_id)
     
     if user:
-        user_bets = db.get_user_bets(user_id)
+        # Используем новый метод для получения ставок с информацией о матчах
+        user_bets = db.get_user_bets_with_match_info(user_id)
         user_tournaments = db.get_user_tournaments_with_bets(user_id)
         
         profile_text = f"""👤 **Ваш профиль:**
@@ -220,7 +237,22 @@ async def tournament_my_bets_callback(callback: CallbackQuery, state: FSMContext
         text = f"📋 Ваши ставки в турнире: {tournament[1]}\n\n"
         
         for bet in bets:
-            text += f"📅 {bet[5]} | {bet[6]} | {bet[7]} vs {bet[8]} | Счет: {bet[3]}\n\n"
+            # Получаем полную информацию о матче с результатом
+            match = db.get_match(bet[2])  # bet[2] - match_id
+            
+            # Проверяем есть ли результат и он не пустой и не является датой
+            match_result = match[8] if len(match) > 8 else None
+            
+            # Простая проверка: если результат содержит "-" и состоит только из цифр и дефиса, то это счет
+            if (match_result and 
+                match_result != 'None' and 
+                '-' in str(match_result) and
+                all(c.isdigit() or c == '-' for c in str(match_result).strip())):
+                result_text = f" | 🎯 Итог: `{match_result}`"  # Зеленый шрифт
+            else:
+                result_text = " | 🎯 Итог: `Неизвестно`"  # Зеленый шрифт
+            
+            text += f"📅 {bet[5]} | {bet[6]} | {bet[7]} vs {bet[8]} | Счет: {bet[3]}{result_text}\n\n"
         
         await safe_edit_message(
             callback,
@@ -437,8 +469,13 @@ async def process_username(message: Message, state: FSMContext):
     db = DatabaseHandler('users.db')
     user_id = message.from_user.id
     
+    # Проверка занятости логина
     if db.is_username_taken(new_username):
-        await message.answer("❌ Этот логин уже занят. Выберите другой.")
+        current_user = db.get_user(user_id)
+        if current_user and current_user.username == new_username:
+            await message.answer("ℹ️ Это ваш текущий логин. Введите другой логин для изменения:")
+        else:
+            await message.answer("❌ Этот логин уже занят. Выберите другой логин:")
         return
     
     if db.update_profile(user_id, username=new_username):

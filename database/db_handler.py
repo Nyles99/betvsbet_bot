@@ -82,6 +82,70 @@ class DatabaseHandler:
         except Exception as e:
             logging.error(f"Error updating match status: {e}")
             return False
+    
+    def update_match_result(self, match_id: int, result: str) -> bool:
+        """Обновление результата матча"""
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE matches SET result = ?, status = 'completed' WHERE id = ?
+                ''', (result, match_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logging.error(f"Error updating match result: {e}")
+            return False
+
+    def get_match_with_bets(self, match_id: int):
+        """Получение информации о матче со ставками пользователей"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT m.*, COUNT(ub.id) as bets_count
+                FROM matches m
+                LEFT JOIN user_bets ub ON m.id = ub.match_id
+                WHERE m.id = ?
+                GROUP BY m.id
+            ''', (match_id,))
+            result = cursor.fetchone()
+            return result
+
+    def get_match_bets_count(self, match_id: int) -> int:
+        """Получение количества ставок на матч"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) FROM user_bets WHERE match_id = ?
+            ''', (match_id,))
+            result = cursor.fetchone()
+            return result[0] if result else 0
+    
+    def get_user_bets_with_match_info(self, user_id: int) -> list:
+        """Получить ставки пользователя с информацией о матчах"""
+        with self.conn:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                SELECT 
+                    b.bet_id,
+                    b.match_id,
+                    b.predicted_score,
+                    b.bet_date,
+                    m.match_date,
+                    m.match_time,
+                    m.team1,
+                    m.team2,
+                    m.result as match_result,  -- Берем результат из таблицы matches
+                    t.name as tournament_name
+                FROM user_bets b
+                JOIN matches m ON b.match_id = m.match_id
+                JOIN tournaments t ON m.tournament_id = t.tournament_id
+                WHERE b.user_id = ?
+                ORDER BY m.match_date DESC, m.match_time DESC
+            ''', (user_id,))
+            
+            bets = cursor.fetchall()
+            return bets
         
     def init_database(self):
         """Инициализация базы данных"""
@@ -123,6 +187,7 @@ class DatabaseHandler:
                     team1 TEXT NOT NULL,
                     team2 TEXT NOT NULL,
                     status TEXT DEFAULT 'scheduled',
+                    result TEXT,
                     created_date TEXT,
                     created_by INTEGER,
                     FOREIGN KEY (tournament_id) REFERENCES tournaments (id)
@@ -376,15 +441,14 @@ class DatabaseHandler:
     
     # Методы для матчей
     def add_match(self, tournament_id: int, match_date: str, match_time: str, team1: str, team2: str, created_by: int) -> bool:
-        """Добавление нового матча"""
+        """Добавление матча в турнир"""
         try:
-            with sqlite3.connect(self.db_name) as conn:
-                cursor = conn.cursor()
+            with self.conn:
+                cursor = self.conn.cursor()
                 cursor.execute('''
-                    INSERT INTO matches (tournament_id, match_date, match_time, team1, team2, created_date, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (tournament_id, match_date, match_time, team1, team2, self.get_moscow_time(), created_by))
-                conn.commit()
+                    INSERT INTO matches (tournament_id, match_date, match_time, team1, team2, created_by, result)
+                    VALUES (?, ?, ?, ?, ?, ?, NULL)  -- Явно устанавливаем result в NULL
+                ''', (tournament_id, match_date, match_time, team1, team2, created_by))
                 return True
         except Exception as e:
             logging.error(f"Error adding match: {e}")
