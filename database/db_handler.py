@@ -631,3 +631,104 @@ class DatabaseHandler:
         if self.conn:
             self.conn.close()
             self.conn = None
+
+    def get_tournament_leaderboard(self, tournament_id: int, limit: int = None, offset: int = 0):
+        """Получение рейтинга игроков турнира"""
+        self._ensure_connection()
+        try:
+            cursor = self.conn.cursor()
+            
+            # Сначала получаем всех игроков с их ставками и результатами
+            cursor.execute('''
+                SELECT 
+                    u.user_id,
+                    u.username,
+                    b.bet_id,
+                    b.predicted_score,
+                    m.result
+                FROM users u
+                JOIN user_bets b ON u.user_id = b.user_id
+                JOIN matches m ON b.match_id = m.match_id
+                WHERE m.tournament_id = ? AND m.result IS NOT NULL AND m.result != 'None'
+            ''', (tournament_id,))
+            
+            # Группируем по игрокам и рассчитываем очки в Python
+            player_stats = {}
+            
+            for row in cursor.fetchall():
+                user_id = row[0]
+                username = row[1] or f"ID{row[0]}"
+                predicted_score = row[3]
+                actual_score = row[4]
+                
+                if user_id not in player_stats:
+                    player_stats[user_id] = {
+                        'username': username,
+                        'matches_played': 0,
+                        'exact_scores': 0,
+                        'total_points': 0
+                    }
+                
+                player_stats[user_id]['matches_played'] += 1
+                
+                # Рассчитываем очки с помощью нашей функции
+                from utils.scoring_system import calculate_points
+                points = calculate_points(predicted_score, actual_score)
+                player_stats[user_id]['total_points'] += points
+                
+                if points == 4:  # Точный счет
+                    player_stats[user_id]['exact_scores'] += 1
+            
+            # Преобразуем в список и сортируем
+            leaderboard = []
+            for user_id, stats in player_stats.items():
+                leaderboard.append({
+                    'user_id': user_id,
+                    'username': stats['username'],
+                    'matches_played': stats['matches_played'],
+                    'exact_scores': stats['exact_scores'],
+                    'total_points': stats['total_points']
+                })
+            
+            # Сортируем по очкам (по убыванию)
+            leaderboard.sort(key=lambda x: x['total_points'], reverse=True)
+            
+            # Применяем пагинацию
+            if limit:
+                return leaderboard[offset:offset + limit]
+            return leaderboard
+            
+        except Exception as e:
+            logging.error(f"Error getting tournament leaderboard: {e}")
+            return []
+    
+    def get_user_completed_bets(self, user_id: int, tournament_id: int):
+        """Получение завершенных ставок пользователя в турнире (только матчи с результатами или истекшие)"""
+        self._ensure_connection()
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                SELECT 
+                    b.bet_id,
+                    b.match_id,
+                    b.predicted_score,
+                    b.bet_date,
+                    m.match_date,
+                    m.match_time,
+                    m.team1,
+                    m.team2,
+                    m.result as match_result,
+                    t.name as tournament_name
+                FROM user_bets b
+                JOIN matches m ON b.match_id = m.match_id
+                JOIN tournaments t ON m.tournament_id = t.tournament_id
+                WHERE b.user_id = ? AND m.tournament_id = ?
+                AND (m.result IS NOT NULL AND m.result != 'None' OR 
+                    datetime(m.match_date || ' ' || m.match_time, '+3 hours') <= datetime('now'))
+                ORDER BY m.match_date DESC, m.match_time DESC
+            ''', (user_id, tournament_id))
+            
+            return cursor.fetchall()
+        except Exception as e:
+            logging.error(f"Error getting user completed bets: {e}")
+            return []

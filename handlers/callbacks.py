@@ -3,6 +3,10 @@ from aiogram.dispatcher import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.exceptions import MessageNotModified
 from database.db_handler import DatabaseHandler
+from aiogram.types import (
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
 from keyboards.menu import (
     get_main_inline_keyboard,
     get_profile_inline_keyboard,
@@ -12,6 +16,8 @@ from keyboards.menu import (
     get_user_tournament_matches_keyboard,
     get_tournament_detail_keyboard,
     get_tournament_players_keyboard,
+    get_tournament_leaderboard_keyboard,
+    get_player_bets_keyboard,
     get_back_keyboard
 )
 from states.user_states import ProfileStates, UserBetStates
@@ -313,7 +319,7 @@ async def tournament_players_callback(callback: CallbackQuery, state: FSMContext
         
         if users:
             # Пагинация
-            users_per_page = 10
+            users_per_page = 8  # Уменьшил для кнопок
             total_pages = (len(users) + users_per_page - 1) // users_per_page
             start_index = page * users_per_page
             end_index = start_index + users_per_page
@@ -321,18 +327,44 @@ async def tournament_players_callback(callback: CallbackQuery, state: FSMContext
             
             text = f"👥 Игроки турнира: {tournament[1]}\n\n"
             text += f"📊 Всего участников: {len(users)}\n\n"
+            text += "Нажмите '📊 Посмотреть ставки' чтобы увидеть завершенные ставки игрока:\n\n"
+            
+            # Создаем клавиатуру с кнопками
+            keyboard = InlineKeyboardMarkup(row_width=1)
             
             for i, user in enumerate(current_users, start_index + 1):
                 user_info = f"{i}. ID: {user.user_id}"
                 if user.username:
                     user_info += f", 👤: @{user.username}"
-                user_info += "\n"
-                text += user_info
+                if user.full_name:
+                    user_info += f", 📛: {user.full_name}"
+                
+                # Добавляем кнопку для просмотра ставок
+                keyboard.add(InlineKeyboardButton(
+                    f"📊 {user_info}",
+                    callback_data=f"view_bets_{tournament_id}_{user.user_id}_{page}"
+                ))
             
-            await safe_edit_message(
-                callback,
+            # Кнопки пагинации
+            if total_pages > 1:
+                pagination_buttons = []
+                if page > 0:
+                    pagination_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"players_{tournament_id}_{page-1}"))
+                
+                pagination_buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="no_action"))
+                
+                if page < total_pages - 1:
+                    pagination_buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"players_{tournament_id}_{page+1}"))
+                
+                if pagination_buttons:
+                    keyboard.row(*pagination_buttons)
+            
+            # Кнопка назад
+            keyboard.row(InlineKeyboardButton("🔙 Назад к турниру", callback_data=f"my_tournament_detail_{tournament_id}"))
+            
+            await callback.message.edit_text(
                 text,
-                get_tournament_players_keyboard(tournament_id, page, total_pages, len(users))
+                reply_markup=keyboard
             )
         else:
             text = f"👥 В турнире '{tournament[1]}' пока нет участников."
@@ -346,7 +378,7 @@ async def tournament_players_callback(callback: CallbackQuery, state: FSMContext
         await callback.answer("❌ Ошибка при загрузке игроков", show_alert=True)
 
 async def tournament_leaderboard_callback(callback: CallbackQuery, state: FSMContext):
-    """Общая таблица турнира"""
+    """Общая таблица турнира с рейтингом игроков"""
     await state.finish()
     
     try:
@@ -355,23 +387,91 @@ async def tournament_leaderboard_callback(callback: CallbackQuery, state: FSMCon
             await callback.answer("❌ Ошибка: неверный формат данных", show_alert=True)
             return
         
-        tournament_id = int(parts[1])  # leaderboard_123
+        tournament_id = int(parts[1])  # leaderboard_123 или leaderboard_123_0
         
-        text = """📊 Общая таблица турнира
-
-⏳ Функция находится в разработке.
-В будущем здесь будет отображаться рейтинг участников.
-
-Следите за обновлениями!"""
+        # Получаем номер страницы
+        page = 0
+        if len(parts) > 2:
+            try:
+                page = int(parts[2])
+            except (ValueError, IndexError):
+                page = 0
         
-        await safe_edit_message(
-            callback,
-            text,
-            get_tournament_detail_keyboard(tournament_id)
-        )
+        db = DatabaseHandler('users.db')
+        tournament = db.get_tournament(tournament_id)
+        
+        if not tournament:
+            await callback.answer("❌ Турнир не найден.", show_alert=True)
+            return
+        
+        # Получаем рейтинг игроков с пагинацией
+        players_per_page = 10
+        all_players = db.get_tournament_leaderboard(tournament_id)
+        total_players = len(all_players)
+        
+        # Применяем пагинацию
+        start_index = page * players_per_page
+        end_index = start_index + players_per_page
+        current_players = all_players[start_index:end_index]
+        
+        if current_players:
+            text = f"🏆 **Рейтинг игроков: {tournament[1]}**\n\n"
+            text += "```\n"
+            text += "Место| Логин        | Матчи | ТС |Очки\n"
+            text += "-----|--------------|-------|----|----\n"
+            
+            for i, player in enumerate(current_players, start_index + 1):
+                # Определяем медаль для первых трех мест
+                medal = ""
+                if i == 1:
+                    medal = "🥇"
+                elif i == 2:
+                    medal = "🥈"
+                elif i == 3:
+                    medal = "🥉"
+                else:
+                    medal = f"{i}"
+                
+                # Форматируем логин (обрезаем если длинный)
+                username = player['username']
+                if len(username) > 12:
+                    username = username[:12] + "..."
+                else:
+                    username = username.ljust(12)
+                
+                # Форматируем количество матчей
+                matches_text = f"{player['matches_played']}"
+                if player['matches_played'] == 1:
+                    matches_text += " матч"
+                elif 2 <= player['matches_played'] <= 4:
+                    matches_text += " матча"
+                else:
+                    matches_text += " матчей"
+                
+                text += f"{medal:3} | {username} | {matches_text:3}|{player['exact_scores']:3} |{player['total_points']:3}\n"
+            
+            text += "```\n\n"
+            text += f"📊 Всего игроков: {total_players}\n"
+            text += f"📄 Страница {page + 1}/{(total_players + players_per_page - 1) // players_per_page}"
+            
+            await safe_edit_message(
+                callback,
+                text,
+                get_tournament_leaderboard_keyboard(tournament_id, page, total_players, players_per_page)
+            )
+        else:
+            text = f"🏆 **Рейтинг игроков: {tournament[1]}**\n\n"
+            text += "📊 В этом турнире пока нет результатов для составления рейтинга.\n\n"
+            text += "Рейтинг появится после того как администратор введет результаты матчей."
+            
+            await safe_edit_message(
+                callback,
+                text,
+                get_tournament_detail_keyboard(tournament_id)
+            )
     except (ValueError, IndexError) as e:
         logging.error(f"Error in tournament_leaderboard_callback: {e}, data: {callback.data}")
-        await callback.answer("❌ Ошибка при загрузке таблицы", show_alert=True)
+        await callback.answer("❌ Ошибка при загрузке рейтинга", show_alert=True)
 
 async def tournament_rules_callback(callback: CallbackQuery, state: FSMContext):
     """Правила турнира"""
@@ -671,6 +771,80 @@ async def no_action_callback(callback: CallbackQuery):
     """Обработчик для кнопок без действия"""
     await callback.answer("⏳ Эта функция находится в разработке", show_alert=True)
 
+async def view_player_bets_callback(callback: CallbackQuery, state: FSMContext):
+    """Просмотр завершенных ставок другого игрока"""
+    await state.finish()
+    
+    try:
+        parts = callback.data.split('_')
+        if len(parts) < 4:
+            await callback.answer("❌ Ошибка: неверный формат данных", show_alert=True)
+            return
+        
+        tournament_id = int(parts[2])  # view_bets_123_456_0
+        target_user_id = int(parts[3])
+        
+        # Получаем номер страницы (для возврата)
+        page = 0
+        if len(parts) > 4:
+            try:
+                page = int(parts[4])
+            except (ValueError, IndexError):
+                page = 0
+        
+        db = DatabaseHandler('users.db')
+        tournament = db.get_tournament(tournament_id)
+        target_user = db.get_user(target_user_id)
+        
+        if not tournament or not target_user:
+            await callback.answer("❌ Турнир или игрок не найден.", show_alert=True)
+            return
+        
+        # Получаем завершенные ставки игрока
+        completed_bets = db.get_user_completed_bets(target_user_id, tournament_id)
+        
+        if completed_bets:
+            username = target_user.username or f"ID{target_user_id}"
+            text = f"📊 **Завершенные ставки игрока: {username}**\n"
+            text += f"🏆 Турнир: {tournament[1]}\n\n"
+            
+            for bet in completed_bets:
+                match_result = bet[8] if len(bet) > 8 else None
+                
+                bet_text = f"📅 {bet[4]} | {bet[5]} | {bet[6]} vs {bet[7]} | Счет: {bet[2]}"
+                
+                if (match_result and 
+                    match_result != 'None' and 
+                    '-' in str(match_result) and
+                    all(c.isdigit() or c == '-' for c in str(match_result).strip())):
+                    bet_text += f" | 🎯 Итог: `{match_result}`"
+                    
+                    # Рассчитываем и добавляем очки
+                    points = calculate_points(bet[2], match_result)
+                    bet_text += f" | Очки: {points}"
+                else:
+                    # Матч истек, но результата нет
+                    bet_text += " | 🎯 Итог: `Ожидается`"
+                
+                text += bet_text + "\n\n"
+            
+        else:
+            username = target_user.username or f"ID{target_user_id}"
+            text = f"📊 **Завершенные ставки игрока: {username}**\n"
+            text += f"🏆 Турнир: {tournament[1]}\n\n"
+            text += "📭 У этого игрока пока нет завершенных ставок для просмотра.\n\n"
+            text += "Ставки появятся здесь после начала матчей."
+        
+        await safe_edit_message(
+            callback,
+            text,
+            get_player_bets_keyboard(tournament_id, target_user_id, page)
+        )
+        
+    except (ValueError, IndexError) as e:
+        logging.error(f"Error in view_player_bets_callback: {e}, data: {callback.data}")
+        await callback.answer("❌ Ошибка при загрузке ставок игрока", show_alert=True)
+
 def register_callback_handlers(dp: Dispatcher):
     """Регистрация обработчиков колбэков"""
     
@@ -701,6 +875,9 @@ def register_callback_handlers(dp: Dispatcher):
     dp.register_callback_query_handler(tournament_leaderboard_callback, lambda c: c.data.startswith("leaderboard_"), state="*")
     dp.register_callback_query_handler(tournament_rules_callback, lambda c: c.data.startswith("rules_"), state="*")
     dp.register_callback_query_handler(tournament_players_callback, lambda c: c.data.startswith("players_"), state="*")
+    
+    # Просмотр ставок других игроков
+    dp.register_callback_query_handler(view_player_bets_callback, lambda c: c.data.startswith("view_bets_"), state="*")
     
     # Матчи и ставки
     dp.register_callback_query_handler(user_match_detail_callback, lambda c: c.data.startswith("user_match_"), state="*")

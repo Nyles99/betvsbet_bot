@@ -112,25 +112,35 @@ def get_tournament_detail_keyboard(tournament_id, page=0):
     )
 
 def get_tournament_players_keyboard(tournament_id, page, total_pages, players_count):
-    """Клавиатура списка игроков турнира с пагинацией"""
-    keyboard = InlineKeyboardMarkup(row_width=3)
+    """Клавиатура списка игроков турнира с пагинацией и кнопками просмотра ставок"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
     
     # Кнопки пагинации (только если есть больше одной страницы)
     if total_pages > 1:
         pagination_buttons = []
         if page > 0:
-            pagination_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"tournament_players_{tournament_id}_{page-1}"))
+            pagination_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"players_{tournament_id}_{page-1}"))
         
         pagination_buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="no_action"))
         
         if page < total_pages - 1:
-            pagination_buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"tournament_players_{tournament_id}_{page+1}"))
+            pagination_buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"players_{tournament_id}_{page+1}"))
         
         if pagination_buttons:
             keyboard.row(*pagination_buttons)
     
     # Кнопка назад к деталям турнира
     keyboard.row(InlineKeyboardButton("🔙 Назад к турниру", callback_data=f"my_tournament_detail_{tournament_id}"))
+    
+    return keyboard
+
+def get_player_bets_keyboard(tournament_id, user_id, page=0):
+    """Клавиатура для просмотра ставок конкретного игрока"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    
+    keyboard.add(
+        InlineKeyboardButton("🔙 Назад к игрокам", callback_data=f"players_{tournament_id}_{page}")
+    )
     
     return keyboard
 
@@ -205,6 +215,33 @@ def get_user_tournament_bets_keyboard(tournament_id, bets):
     
     # Кнопка назад
     keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data=f"my_tournament_detail_{tournament_id}"))
+    
+    return keyboard
+
+def get_tournament_leaderboard_keyboard(tournament_id, page, total_players, players_per_page=10):
+    """Клавиатура для рейтинга игроков с пагинацией"""
+    keyboard = InlineKeyboardMarkup(row_width=3)
+    
+    total_pages = (total_players + players_per_page - 1) // players_per_page
+    
+    # Кнопки пагинации
+    pagination_buttons = []
+    if page > 0:
+        pagination_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"leaderboard_{tournament_id}_{page-1}"))
+    
+    pagination_buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="no_action"))
+    
+    if page < total_pages - 1:
+        pagination_buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"leaderboard_{tournament_id}_{page+1}"))
+    
+    if pagination_buttons:
+        keyboard.row(*pagination_buttons)
+    
+    # Кнопка обновления и назад
+    keyboard.row(
+        InlineKeyboardButton("🔄 Обновить", callback_data=f"leaderboard_{tournament_id}_0"),
+        InlineKeyboardButton("🔙 Назад к турниру", callback_data=f"my_tournament_detail_{tournament_id}")
+    )
     
     return keyboard
 
