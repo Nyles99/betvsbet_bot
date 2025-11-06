@@ -104,10 +104,10 @@ def get_my_tournaments_keyboard(tournaments):
 def get_tournament_detail_keyboard(tournament_id, page=0):
     """Клавиатура детальной информации о турнире"""
     return InlineKeyboardMarkup(row_width=2).add(
-        InlineKeyboardButton("📋 Мои ставки", callback_data=f"tournament_my_bets_{tournament_id}"),
-        InlineKeyboardButton("📊 Общая таблица", callback_data=f"tournament_leaderboard_{tournament_id}"),
-        InlineKeyboardButton("📖 Правила", callback_data=f"tournament_rules_{tournament_id}"),
-        InlineKeyboardButton("👥 Игроки турнира", callback_data=f"tournament_players_{tournament_id}_0"),
+        InlineKeyboardButton("📋 Мои ставки", callback_data=f"bets_{tournament_id}"),
+        InlineKeyboardButton("📊 Общая таблица", callback_data=f"leaderboard_{tournament_id}"),
+        InlineKeyboardButton("📖 Правила", callback_data=f"rules_{tournament_id}"),
+        InlineKeyboardButton("👥 Игроки турнира", callback_data=f"players_{tournament_id}_0"),
         InlineKeyboardButton("🔙 Назад", callback_data="my_tournaments")
     )
 
